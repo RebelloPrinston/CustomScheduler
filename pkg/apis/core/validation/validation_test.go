@@ -10742,6 +10742,77 @@ func TestValidatePod(t *testing.T) {
 				},
 			}),
 		),
+		"valid PodCertificate projected volume using defaults": *podtest.MakePod("valid-extended",
+			podtest.SetVolumes(core.Volume{
+				Name: "projected-volume",
+				VolumeSource: core.VolumeSource{
+					Projected: &core.ProjectedVolumeSource{
+						Sources: []core.VolumeProjection{
+							{
+								PodCertificate: &core.PodCertificateProjection{
+									CredentialBundlePath: "abc",
+								},
+							},
+						},
+					},
+				},
+			}),
+		),
+		"valid PodCertificate projected volume using credentialBundlePath": *podtest.MakePod("valid-extended",
+			podtest.SetVolumes(core.Volume{
+				Name: "projected-volume",
+				VolumeSource: core.VolumeSource{
+					Projected: &core.ProjectedVolumeSource{
+						Sources: []core.VolumeProjection{
+							{
+								PodCertificate: &core.PodCertificateProjection{
+									KeyType:              "ED25519",
+									MaxExpirationSeconds: 0,
+									CredentialBundlePath: "abc",
+								},
+							},
+						},
+					},
+				},
+			}),
+		),
+		"valid PodCertificate projected volume using keyPath and certificateChainPath": *podtest.MakePod("valid-extended",
+			podtest.SetVolumes(core.Volume{
+				Name: "projected-volume",
+				VolumeSource: core.VolumeSource{
+					Projected: &core.ProjectedVolumeSource{
+						Sources: []core.VolumeProjection{
+							{
+								PodCertificate: &core.PodCertificateProjection{
+									KeyType:              "ED25519",
+									MaxExpirationSeconds: 0,
+									KeyPath:              "abc",
+									CertificateChainPath: "def",
+								},
+							},
+						},
+					},
+				},
+			}),
+		),
+		"valid PodCertificate projected volume using explicit maxExpirationSeconds": *podtest.MakePod("valid-extended",
+			podtest.SetVolumes(core.Volume{
+				Name: "projected-volume",
+				VolumeSource: core.VolumeSource{
+					Projected: &core.ProjectedVolumeSource{
+						Sources: []core.VolumeProjection{
+							{
+								PodCertificate: &core.PodCertificateProjection{
+									KeyType:              "ED25519",
+									MaxExpirationSeconds: 7200,
+									CredentialBundlePath: "abc",
+								},
+							},
+						},
+					},
+				},
+			}),
+		),
 		"ephemeral volume + PVC, no conflict between them": *podtest.MakePod("valid-extended",
 			podtest.SetVolumes(
 				core.Volume{Name: "pvc", VolumeSource: core.VolumeSource{PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "my-pvc"}}},
@@ -12200,6 +12271,122 @@ func TestValidatePod(t *testing.T) {
 									ClusterTrustBundle: &core.ClusterTrustBundleProjection{
 										Path:       "foo-path",
 										SignerName: utilpointer.String("example.com/foo/invalid"),
+									},
+								},
+							},
+						},
+					},
+				}),
+			),
+		},
+		"PodCertificate projected volume with invalid keyType": {
+			expectedError: "keyType must be one of",
+			spec: *podtest.MakePod("valid-extended",
+				podtest.SetVolumes(core.Volume{
+					Name: "projected-volume",
+					VolumeSource: core.VolumeSource{
+						Projected: &core.ProjectedVolumeSource{
+							Sources: []core.VolumeProjection{
+								{
+									PodCertificate: &core.PodCertificateProjection{
+										KeyType:              "RSA2048",
+										CredentialBundlePath: "foo-path",
+									},
+								},
+							},
+						},
+					},
+				}),
+			),
+		},
+		"PodCertificate projected volume with invalid maxExpirationSeconds": {
+			expectedError: "maxExpirationSeconds must be 0 or greater than 3600",
+			spec: *podtest.MakePod("valid-extended",
+				podtest.SetVolumes(core.Volume{
+					Name: "projected-volume",
+					VolumeSource: core.VolumeSource{
+						Projected: &core.ProjectedVolumeSource{
+							Sources: []core.VolumeProjection{
+								{
+									PodCertificate: &core.PodCertificateProjection{
+										MaxExpirationSeconds: 1000,
+										CredentialBundlePath: "foo-path",
+									},
+								},
+							},
+						},
+					},
+				}),
+			),
+		},
+		"PodCertificate projected volume with no paths": {
+			expectedError: "must specify either credentialBundlePath or both of keyPath and certificateChainPath",
+			spec: *podtest.MakePod("valid-extended",
+				podtest.SetVolumes(core.Volume{
+					Name: "projected-volume",
+					VolumeSource: core.VolumeSource{
+						Projected: &core.ProjectedVolumeSource{
+							Sources: []core.VolumeProjection{
+								{
+									PodCertificate: &core.PodCertificateProjection{},
+								},
+							},
+						},
+					},
+				}),
+			),
+		},
+		"PodCertificate projected volume with credentialBundlePath and keyPath": {
+			expectedError: "must specify either credentialBundlePath or both of keyPath and certificateChainPath",
+			spec: *podtest.MakePod("valid-extended",
+				podtest.SetVolumes(core.Volume{
+					Name: "projected-volume",
+					VolumeSource: core.VolumeSource{
+						Projected: &core.ProjectedVolumeSource{
+							Sources: []core.VolumeProjection{
+								{
+									PodCertificate: &core.PodCertificateProjection{
+										CredentialBundlePath: "credpath",
+										KeyPath:              "keypath",
+									},
+								},
+							},
+						},
+					},
+				}),
+			),
+		},
+		"PodCertificate projected volume with credentialBundlePath and certificateChainpath": {
+			expectedError: "must specify either credentialBundlePath or both of keyPath and certificateChainPath",
+			spec: *podtest.MakePod("valid-extended",
+				podtest.SetVolumes(core.Volume{
+					Name: "projected-volume",
+					VolumeSource: core.VolumeSource{
+						Projected: &core.ProjectedVolumeSource{
+							Sources: []core.VolumeProjection{
+								{
+									PodCertificate: &core.PodCertificateProjection{
+										CredentialBundlePath: "credpath",
+										CertificateChainPath: "certificateChainPath",
+									},
+								},
+							},
+						},
+					},
+				}),
+			),
+		},
+		"PodCertificate projected volume with keyPath and no certificateChainPath": {
+			expectedError: "must specify either credentialBundlePath or both of keyPath and certificateChainPath",
+			spec: *podtest.MakePod("valid-extended",
+				podtest.SetVolumes(core.Volume{
+					Name: "projected-volume",
+					VolumeSource: core.VolumeSource{
+						Projected: &core.ProjectedVolumeSource{
+							Sources: []core.VolumeProjection{
+								{
+									PodCertificate: &core.PodCertificateProjection{
+										KeyPath: "keyPath",
 									},
 								},
 							},

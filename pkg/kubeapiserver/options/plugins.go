@@ -27,6 +27,7 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/admission/antiaffinity"
 	certapproval "k8s.io/kubernetes/plugin/pkg/admission/certificates/approval"
 	"k8s.io/kubernetes/plugin/pkg/admission/certificates/ctbattest"
+	"k8s.io/kubernetes/plugin/pkg/admission/certificates/pcrsigning"
 	certsigning "k8s.io/kubernetes/plugin/pkg/admission/certificates/signing"
 	certsubjectrestriction "k8s.io/kubernetes/plugin/pkg/admission/certificates/subjectrestriction"
 	"k8s.io/kubernetes/plugin/pkg/admission/defaulttolerationseconds"
@@ -89,6 +90,7 @@ var AllOrderedPlugins = []string{
 	certsigning.PluginName,                  // CertificateSigning
 	ctbattest.PluginName,                    // ClusterTrustBundleAttest
 	certsubjectrestriction.PluginName,       // CertificateSubjectRestriction
+	pcrsigning.PluginName,                   // PodCertificateRequestSigning
 	defaultingressclass.PluginName,          // DefaultIngressClass
 	denyserviceexternalips.PluginName,       // DenyServiceExternalIPs
 
@@ -135,6 +137,7 @@ func RegisterAllAdmissionPlugins(plugins *admission.Plugins) {
 	certsigning.Register(plugins)
 	ctbattest.Register(plugins)
 	certsubjectrestriction.Register(plugins)
+	pcrsigning.Register(plugins)
 }
 
 // DefaultOffAdmissionPlugins get admission plugins off by default for kube-apiserver.
@@ -160,6 +163,7 @@ func DefaultOffAdmissionPlugins() sets.Set[string] {
 		defaultingressclass.PluginName,          // DefaultIngressClass
 		podsecurity.PluginName,                  // PodSecurity
 		validatingadmissionpolicy.PluginName,    // ValidatingAdmissionPolicy, only active when feature gate ValidatingAdmissionPolicy is enabled
+		pcrsigning.PluginName,                   // PodCertificateRequestSigning, gated by the PodCertificateRequest feature gate
 	)
 
 	return sets.New(AllOrderedPlugins...).Difference(defaultOnPlugins)

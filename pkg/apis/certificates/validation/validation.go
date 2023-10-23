@@ -18,9 +18,16 @@ package validation
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	v1 "k8s.io/api/core/v1"
@@ -568,6 +575,266 @@ func validateTrustBundle(path *field.Path, in string) field.ErrorList {
 		if len(indices) > 1 {
 			allErrors = append(allErrors, field.Invalid(path, "<value omitted>", fmt.Sprintf("duplicate trust anchor (indices %v)", indices)))
 		}
+	}
+
+	return allErrors
+}
+
+// We don't care what you call your pod certificate requests.
+func validatePodCertificateRequestName(name string, prefix bool) []string {
+	return nil
+}
+
+// ValidatePCRCreate checks validation for create.
+//
+// When creating, all spec fields are validated, and all status fields must be
+// empty.
+func ValidatePCRCreate(req *certificates.PodCertificateRequest) field.ErrorList {
+	var allErrors field.ErrorList
+
+	metaErrors := apivalidation.ValidateObjectMeta(&req.ObjectMeta, true, validatePodCertificateRequestName, field.NewPath("metadata"))
+	allErrors = append(allErrors, metaErrors...)
+
+	signerNameErrors := apivalidation.ValidateSignerName(field.NewPath("spec", "signerName"), req.Spec.SignerName)
+	allErrors = append(allErrors, signerNameErrors...)
+
+	// PodName, PodUID, ServiceAccountName, ServiceAccountUID, NodeName, and
+	// NodeUID have already been checked to be real values by the
+	// noderestriction admission plugin.
+
+	if req.Spec.MaxExpirationSeconds < 3600 {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("spec", "maxExpirationSeconds"), req.Spec.MaxExpirationSeconds, "must be >= 3600 (1 hour)"))
+	}
+
+	// Check key and proof of possession.
+	allErrors = append(allErrors, validatePCRSpecCrypto(req)...)
+
+	// All status fields must be empty when created.
+	if len(req.Status.Conditions) != 0 {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "conditions"), req.Status.Conditions, "must be empty upon create"))
+	}
+	if req.Status.CertificateChain != "" {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "certificateChain"), req.Status.CertificateChain, "must be emtpy upon create"))
+	}
+	if req.Status.IssuedAt != nil {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "issuedAt"), req.Status.IssuedAt, "must be unset upon create"))
+	}
+	if req.Status.NotBefore != nil {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "notBefore"), req.Status.NotBefore, "must be unset upon create"))
+	}
+	if req.Status.BeginRefreshAt != nil {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "beginRefreshAt"), req.Status.BeginRefreshAt, "must be unset upon create"))
+	}
+	if req.Status.NotAfter != nil {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "notAfter"), req.Status.NotAfter, "must be unset upon create"))
+	}
+
+	return allErrors
+}
+
+// ValidatePCRStandardUpdate validates normal updates to the PCR object.
+//
+// Normal updates can't do much, since .Spec is immutable and .Status must be
+// updated using the /status subresource.  Basically it can just do normal
+// metadata changes.
+func ValidatePCRStandardUpdate(newReq, oldReq *certificates.PodCertificateRequest) field.ErrorList {
+	var allErrors field.ErrorList
+	allErrors = append(allErrors, apivalidation.ValidateObjectMetaUpdate(&newReq.ObjectMeta, &oldReq.ObjectMeta, field.NewPath("metadata"))...)
+
+	// All spec fields are immutable after creation.
+	allErrors = append(allErrors, validatePCRSpecImmutable(newReq, oldReq)...)
+
+	// TODO(KEP-4317): A standard update may not change status.Conditions.
+
+	// A standard update is not allowed to modify any of the status fields
+	allErrors = append(allErrors, validatePCRStatusImmutable(newReq, oldReq)...)
+
+	return allErrors
+}
+
+// ValidatePCRStatusUpdate validates /status updates to the
+// PCR object.
+//
+// All .Status fields (except .Status.Conditions) are immutable once they are
+// set, and they must all be set in one call.  .Status.Conditions may be freely
+// set, except for conditions with a type of "Denied", "Failed", or
+// "SuggestedKeyType", which are immutable once they are set, and must be true.
+// "Denied" and "Failed" are mutually exclusive.
+func ValidatePCRStatusUpdate(newReq, oldReq *certificates.PodCertificateRequest) field.ErrorList {
+	var allErrors field.ErrorList
+	allErrors = append(allErrors, apivalidation.ValidateObjectMetaUpdate(&newReq.ObjectMeta, &oldReq.ObjectMeta, field.NewPath("metadata"))...)
+
+	// All spec fields are immutable after creation.
+	allErrors = append(allErrors, validatePCRSpecImmutable(newReq, oldReq)...)
+
+	// TODO(KEP-4317): A status update may set arbitrary conditions, but it may
+	// not change the Denied, Failed, or SuggestedKeyType conditions once they
+	// are set.
+	//
+	// Actually, is there value in this?  Consult w/ @enj and @liggitt
+
+	// A status update may not set the status fields if they are already set.
+	if oldReq.Status.CertificateChain != "" ||
+		oldReq.Status.IssuedAt != nil ||
+		oldReq.Status.NotBefore != nil ||
+		oldReq.Status.BeginRefreshAt != nil ||
+		oldReq.Status.NotAfter != nil {
+		allErrors = append(allErrors, validatePCRStatusImmutable(newReq, oldReq)...)
+		return allErrors
+	}
+
+	// The update is valid, so validate the new values.
+
+	allErrors = append(allErrors, validatePCRStatusCrypto(newReq)...)
+
+	if newReq.Status.IssuedAt.Time.IsZero() {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "issuedAt"), newReq.Status.IssuedAt, "must be non-zero"))
+	}
+
+	return allErrors
+}
+
+func validatePCRSpecImmutable(newReq, oldReq *certificates.PodCertificateRequest) field.ErrorList {
+	var allErrors field.ErrorList
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Spec.SignerName, oldReq.Spec.SignerName, field.NewPath("spec", "signerName"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Spec.PodName, oldReq.Spec.PodName, field.NewPath("spec", "podName"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Spec.PodUID, oldReq.Spec.PodUID, field.NewPath("spec", "podUID"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Spec.ServiceAccountName, oldReq.Spec.ServiceAccountName, field.NewPath("spec", "serviceAccountName"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Spec.NodeName, oldReq.Spec.NodeName, field.NewPath("spec", "nodeName"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Spec.MaxExpirationSeconds, oldReq.Spec.MaxExpirationSeconds, field.NewPath("spec", "maxExpirationSeconds"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Spec.PKIXPublicKey, oldReq.Spec.PKIXPublicKey, field.NewPath("spec", "pkixPublicKey"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Spec.ProofOfPossession, oldReq.Spec.ProofOfPossession, field.NewPath("spec", "proofOfPossession"))...)
+	return allErrors
+}
+
+func validatePCRStatusImmutable(newReq, oldReq *certificates.PodCertificateRequest) field.ErrorList {
+	var allErrors field.ErrorList
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Status.CertificateChain, oldReq.Status.CertificateChain, field.NewPath("status", "certificateChain"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Status.IssuedAt, oldReq.Status.IssuedAt, field.NewPath("status", "issuedAt"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Status.NotBefore, oldReq.Status.NotBefore, field.NewPath("status", "notBefore"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Status.BeginRefreshAt, oldReq.Status.BeginRefreshAt, field.NewPath("status", "beginRefreshAt"))...)
+	allErrors = append(allErrors, apivalidation.ValidateImmutableField(newReq.Status.NotAfter, oldReq.Status.NotAfter, field.NewPath("status", "notAfter"))...)
+	return allErrors
+}
+
+func validatePCRSpecCrypto(req *certificates.PodCertificateRequest) field.ErrorList {
+	var allErrors field.ErrorList
+
+	pubKeyAny, err := x509.ParsePKIXPublicKey(req.Spec.PKIXPublicKey)
+	if err != nil {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("spec", "pkixPublicKey"), req.Spec.PKIXPublicKey, fmt.Sprintf("could not parse as PKIX: %v", err)))
+	}
+
+	wantProofMsg := []byte(req.Spec.PodUID)
+
+	switch pubKey := pubKeyAny.(type) {
+	case *rsa.PublicKey:
+		// Check RSA key properties
+		switch pubKey.N.BitLen() {
+		case 3072, 4096:
+			// OK
+		default:
+			allErrors = append(allErrors, field.Invalid(field.NewPath("spec", "pkixPublicKey"), req.Spec.PKIXPublicKey, fmt.Sprintf("bad RSA modulus size %d; valid values are 3072 and 4096", pubKey.N.BitLen())))
+			return allErrors
+		}
+
+		// Check proof of possession
+		wantProofHash := sha256.Sum256(wantProofMsg)
+		if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, wantProofHash[:], req.Spec.ProofOfPossession); err != nil {
+			allErrors = append(allErrors, field.Invalid(field.NewPath("spec", "proofOfPossession"), req.Spec.ProofOfPossession, fmt.Sprintf("bad proof of posession signature: %v", err)))
+			return allErrors
+		}
+
+		return allErrors
+
+	case *ecdsa.PublicKey:
+		// Check ECDSA key properties
+		switch pubKey.Curve {
+		case elliptic.P256(), elliptic.P384():
+			// OK
+		default:
+			allErrors = append(allErrors, field.Invalid(field.NewPath("spec", "pkixPublicKey"), req.Spec.PKIXPublicKey, "bad ECDSA curve; valid values are P256 and P384"))
+			return allErrors
+		}
+
+		// Check proof of possession
+		wantProofHash := sha256.Sum256(wantProofMsg)
+		if !ecdsa.VerifyASN1(pubKey, wantProofHash[:], req.Spec.ProofOfPossession) {
+			allErrors = append(allErrors, field.Invalid(field.NewPath("spec", "proofOfPossession"), req.Spec.ProofOfPossession, "bad proof of possession signature"))
+			return allErrors
+		}
+
+		return allErrors
+
+	case ed25519.PublicKey:
+		// ED25519 has no key properties to verify
+
+		// Check proof of possession
+		if !ed25519.Verify(pubKey, wantProofMsg, req.Spec.ProofOfPossession) {
+			allErrors = append(allErrors, field.Invalid(field.NewPath("spec", "proofOfPossession"), req.Spec.ProofOfPossession, "bad proof of possession signature"))
+			return allErrors
+		}
+
+		return allErrors
+
+	default:
+		allErrors = append(allErrors, field.Invalid(field.NewPath("spec", "pkixPublicKey"), req.Spec.PKIXPublicKey, fmt.Sprintf("bad type %T; only *rsa.PublicKey, *ecdsa.PublicKey, and ed25519.PublicKey are supported", pubKey)))
+		return allErrors
+	}
+}
+
+func validatePCRStatusCrypto(req *certificates.PodCertificateRequest) field.ErrorList {
+	var allErrors field.ErrorList
+
+	var leafBlock *pem.Block
+	var block *pem.Block
+	var rest = []byte(req.Status.CertificateChain)
+	for {
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+
+		if block.Type != "CERTIFICATE" {
+			allErrors = append(allErrors, field.Invalid(field.NewPath("status", "certificateChain"), req.Status.CertificateChain, "contains non-CERTIFICATE block"))
+			return allErrors
+		}
+
+		if leafBlock == nil {
+			leafBlock = block
+		}
+	}
+
+	if leafBlock == nil {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "certificateChain"), req.Status.CertificateChain, "does not contain at least one CERTIFICATE block"))
+		return allErrors
+	}
+
+	leafCert, err := x509.ParseCertificate(leafBlock.Bytes)
+	if err != nil {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "certificateChain"), req.Status.CertificateChain, fmt.Sprintf("leaf certificate not parseable as X.509: %v", err)))
+	}
+
+	// TODO(KEP-4317): Leaf certificate issued to PKIXPublicKey?
+	//
+	// Is this valuable?  It's not a security-critical property.
+
+	if !leafCert.NotBefore.Equal(req.Status.NotBefore.Time) {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "notBefore"), req.Status.NotBefore, "not consistent with leaf certificate"))
+	}
+	if !leafCert.NotAfter.Equal(req.Status.NotAfter.Time) {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "notAfter"), req.Status.NotAfter, "not consistent with leaf certificate"))
+	}
+
+	if req.Status.BeginRefreshAt.Time.Before(leafCert.NotBefore.Add(10 * time.Minute)) {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "beginRefreshAt"), req.Status.BeginRefreshAt, "too early; earliest valid value is NotBefore + 10 minutes"))
+	}
+	if req.Status.BeginRefreshAt.Time.After(leafCert.NotAfter.Add(-10 * time.Minute)) {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "beginRefreshAt"), req.Status.BeginRefreshAt, "too late;  latest valid value is NotAfter + 10 minutes"))
+	}
+
+	if leafCert.NotAfter.Sub(leafCert.NotBefore) > time.Duration(time.Duration(req.Spec.MaxExpirationSeconds)*time.Second) {
+		allErrors = append(allErrors, field.Invalid(field.NewPath("status", "certificateChain"), req.Status.CertificateChain, "issued certificate has longer lifetime than permitted by spec.maxExpirationSeconds"))
 	}
 
 	return allErrors

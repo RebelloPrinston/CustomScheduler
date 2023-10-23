@@ -1237,6 +1237,38 @@ func validateProjectionSources(projection *core.ProjectedVolumeSource, projectio
 				allErrs = append(allErrs, field.Invalid(fldPath, curPath, "conflicting duplicate paths"))
 			}
 		}
+		if projPath := srcPath.Child("podCertificate"); source.PodCertificate != nil {
+			numSources++
+
+			// Validate key type
+			switch source.PodCertificate.KeyType {
+			case "":
+				// Empty string gets defaulted to ECDSAP256
+			case "RSA3072", "RSA4096", "ECDSAP256", "ECDSAP384", "ED25519":
+				// These are valid explicit values
+			default:
+				allErrs = append(allErrs, field.Invalid(projPath.Child("keyType"), source.PodCertificate.KeyType, "keyType must be one of RSA3072, RSA4096, ECDSAP256, ECDSAP384, or ED25519"))
+			}
+
+			// Validate max expiration seconds
+			if source.PodCertificate.MaxExpirationSeconds != 0 && source.PodCertificate.MaxExpirationSeconds < 3600 {
+				allErrs = append(allErrs, field.Invalid(projPath.Child("maxExpirationSeconds"), source.PodCertificate.MaxExpirationSeconds, "maxExpirationSeconds must be 0 or greater than 3600"))
+			}
+
+			// Validate paths
+			usingBundle := source.PodCertificate.CredentialBundlePath != ""
+			usingCert := source.PodCertificate.CertificateChainPath != ""
+			usingKey := source.PodCertificate.KeyPath != ""
+			switch {
+			case usingBundle && !(usingKey || usingCert):
+				allErrs = append(allErrs, ValidateLocalNonReservedPath(source.PodCertificate.CredentialBundlePath, projPath.Child("credentialBundlePath"))...)
+			case !usingBundle && (usingKey && usingCert):
+				allErrs = append(allErrs, ValidateLocalNonReservedPath(source.PodCertificate.KeyPath, projPath.Child("keyPath"))...)
+				allErrs = append(allErrs, ValidateLocalNonReservedPath(source.PodCertificate.CertificateChainPath, projPath.Child("certificateChainPath"))...)
+			default:
+				allErrs = append(allErrs, field.Invalid(projPath, source.PodCertificate, "must specify either credentialBundlePath or both of keyPath and certificateChainPath"))
+			}
+		}
 		if numSources > 1 {
 			allErrs = append(allErrs, field.Forbidden(srcPath, "may not specify more than 1 volume type per source"))
 		}
