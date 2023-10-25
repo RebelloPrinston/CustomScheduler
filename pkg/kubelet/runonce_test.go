@@ -42,6 +42,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/eviction"
 	kubepod "k8s.io/kubernetes/pkg/kubelet/pod"
 	podtest "k8s.io/kubernetes/pkg/kubelet/pod/testing"
+	"k8s.io/kubernetes/pkg/kubelet/podcertificate"
 	"k8s.io/kubernetes/pkg/kubelet/secret"
 	"k8s.io/kubernetes/pkg/kubelet/server/stats"
 	"k8s.io/kubernetes/pkg/kubelet/status"
@@ -71,6 +72,7 @@ func TestRunOnce(t *testing.T) {
 	fakeSecretManager := secret.NewFakeManager()
 	fakeConfigMapManager := configmap.NewFakeManager()
 	clusterTrustBundleManager := &clustertrustbundle.NoopManager{}
+	podCertificateManager := &podcertificate.NoOpManager{}
 	podManager := kubepod.NewBasicPodManager()
 	fakeRuntime := &containertest.FakeRuntime{}
 	podStartupLatencyTracker := kubeletutil.NewPodStartupLatencyTracker()
@@ -103,7 +105,7 @@ func TestRunOnce(t *testing.T) {
 
 	plug := &volumetest.FakeVolumePlugin{PluginName: "fake", Host: nil}
 	kb.volumePluginMgr, err =
-		NewInitializedVolumePluginMgr(kb, fakeSecretManager, fakeConfigMapManager, nil, clusterTrustBundleManager, []volume.VolumePlugin{plug}, nil /* prober */)
+		NewInitializedVolumePluginMgr(kb, fakeSecretManager, fakeConfigMapManager, nil, clusterTrustBundleManager, podCertificateManager, []volume.VolumePlugin{plug}, nil /* prober */)
 	if err != nil {
 		t.Fatalf("failed to initialize VolumePluginMgr: %v", err)
 	}
