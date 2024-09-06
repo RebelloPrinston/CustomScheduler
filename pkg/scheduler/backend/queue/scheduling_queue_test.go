@@ -108,8 +108,8 @@ func init() {
 	metrics.Register()
 }
 
-func setQueuedPodInfoGated(queuedPodInfo *framework.QueuedPodInfo) *framework.QueuedPodInfo {
-	queuedPodInfo.Gated = true
+func setQueuedPodInfoGated(queuedPodInfo *framework.QueuedPodInfo, gatingPlugin string) *framework.QueuedPodInfo {
+	queuedPodInfo.GatingPlugin = gatingPlugin
 	return queuedPodInfo
 }
 
@@ -1676,22 +1676,27 @@ func TestPriorityQueue_MoveAllToActiveOrBackoffQueueWithQueueingHint(t *testing.
 			expectedQ: unschedulablePods,
 		},
 		{
-			name:    "QueueHintFunction is not called when Pod is gated by SchedulingGates plugin",
-			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), UnschedulablePlugins: sets.New(names.SchedulingGates, "foo")}),
+			name:    "QueueHintFunction is not called when Pod is gated by the plugin that isn't interested in the NodeAdd event",
+			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), UnschedulablePlugins: sets.New(names.SchedulingGates, "foo")}, names.SchedulingGates),
+			// The hintFn should not be called as the pod is gated by SchedulingGates plugin,
+			// the scheduling gate isn't interested in the node add event,
+			// and the queue should keep this Pod in the unschedQ without calling the hintFn.
 			hint: func(logger klog.Logger, pod *v1.Pod, oldObj, newObj interface{}) (framework.QueueingHint, error) {
 				return framework.Queue, fmt.Errorf("QueueingHintFn should not be called as pod is gated")
 			},
 			expectedQ: unschedulablePods,
 		},
 		{
-			name:      "QueueHintFunction is called when Pod is gated by a plugin other than SchedulingGates",
-			podInfo:   setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), UnschedulablePlugins: sets.New("foo")}),
-			hint:      queueHintReturnQueue,
+			name:    "QueueHintFunction is not called when Pod is gated by the plugin that is interested in the NodeAdd event",
+			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), UnschedulablePlugins: sets.New(names.SchedulingGates, "foo")}, ""),
+			// In this case, the hintFn should be called as the pod is gated by foo plugin that is interested in the NodeAdd event.
+			hint: queueHintReturnQueue,
+			// and, as a result, this pod should be queued to activeQ.
 			expectedQ: activeQ,
 		},
 		{
 			name:      "Pod that experienced a scheduling failure before should be queued to backoffQ after un-gated",
-			podInfo:   setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), Attempts: 1, UnschedulablePlugins: sets.New("foo")}),
+			podInfo:   setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), Attempts: 1, UnschedulablePlugins: sets.New("foo"), GatingPlugin: "foo"}, "foo"),
 			hint:      queueHintReturnQueue,
 			expectedQ: backoffQ,
 		},
@@ -1705,6 +1710,12 @@ func TestPriorityQueue_MoveAllToActiveOrBackoffQueueWithQueueingHint(t *testing.
 				{
 					PluginName:     "foo",
 					QueueingHintFn: test.hint,
+				},
+			}
+			m[""][framework.EventUnscheduledPodUpdate] = []*QueueingHintFunction{
+				{
+					PluginName:     names.SchedulingGates,
+					QueueingHintFn: queueHintReturnQueue,
 				},
 			}
 			cl := testingclock.NewFakeClock(now)
@@ -2972,7 +2983,7 @@ var (
 		})
 	}
 	addPodUnschedulablePods = func(t *testing.T, logger klog.Logger, queue *PriorityQueue, pInfo *framework.QueuedPodInfo) {
-		if !pInfo.Gated {
+		if !pInfo.Gated() {
 			// Update pod condition to unschedulable.
 			podutil.UpdatePodCondition(&pInfo.Pod.Status, &v1.PodCondition{
 				Type:    v1.PodScheduled,
@@ -3104,6 +3115,8 @@ func TestPodTimestamp(t *testing.T) {
 // TestPendingPodsMetric tests Prometheus metrics related with pending pods
 func TestPendingPodsMetric(t *testing.T) {
 	timestamp := time.Now()
+	preenqueuePluginName := "preEnqueuePlugin"
+	metrics.Register()
 	total := 60
 	queueableNum := 50
 	queueable, failme := "queueable", "failme"
@@ -3113,7 +3126,7 @@ func TestPendingPodsMetric(t *testing.T) {
 	gated := makeQueuedPodInfos(total-queueableNum, "y", failme, timestamp)
 	// Manually mark them as gated=true.
 	for _, pInfo := range gated {
-		setQueuedPodInfoGated(pInfo)
+		setQueuedPodInfoGated(pInfo, preenqueuePluginName)
 	}
 	pInfos = append(pInfos, gated...)
 	totalWithDelay := 20
@@ -3368,9 +3381,16 @@ scheduler_plugin_execution_duration_seconds_count{extension_point="PreEnqueue",p
 			resetMetrics()
 			resetPodInfos()
 
-			m := map[string][]framework.PreEnqueuePlugin{"": {&preEnqueuePlugin{allowlists: []string{queueable}}}}
+			m := makeEmptyQueueingHintMapPerProfile()
+			m[""][framework.EventUnscheduledPodUpdate] = []*QueueingHintFunction{
+				{
+					PluginName:     preenqueuePluginName,
+					QueueingHintFn: queueHintReturnQueue,
+				},
+			}
+			preenq := map[string][]framework.PreEnqueuePlugin{"": {&preEnqueuePlugin{allowlists: []string{queueable}}}}
 			recorder := metrics.NewMetricsAsyncRecorder(3, 20*time.Microsecond, ctx.Done())
-			queue := NewTestQueue(ctx, newDefaultQueueSort(), WithClock(testingclock.NewFakeClock(timestamp)), WithPreEnqueuePluginMap(m), WithPluginMetricsSamplePercent(test.pluginMetricsSamplePercent), WithMetricsRecorder(*recorder))
+			queue := NewTestQueue(ctx, newDefaultQueueSort(), WithClock(testingclock.NewFakeClock(timestamp)), WithPreEnqueuePluginMap(preenq), WithPluginMetricsSamplePercent(test.pluginMetricsSamplePercent), WithMetricsRecorder(*recorder), WithQueueingHintMapPerProfile(m))
 			for i, op := range test.operations {
 				for _, pInfo := range test.operands[i] {
 					op(t, logger, queue, pInfo)
@@ -4156,7 +4176,7 @@ func Test_queuedPodInfo_gatedSetUponCreationAndUnsetUponUpdate(t *testing.T) {
 	gatedPod := st.MakePod().SchedulingGates([]string{"hello world"}).Obj()
 	q.Add(logger, gatedPod)
 
-	if !q.unschedulablePods.get(gatedPod).Gated {
+	if !q.unschedulablePods.get(gatedPod).Gated() {
 		t.Error("Expected pod to be gated")
 	}
 
@@ -4165,7 +4185,7 @@ func Test_queuedPodInfo_gatedSetUponCreationAndUnsetUponUpdate(t *testing.T) {
 	q.Update(logger, gatedPod, ungatedPod)
 
 	ungatedPodInfo, _ := q.Pop(logger)
-	if ungatedPodInfo.Gated {
+	if ungatedPodInfo.Gated() {
 		t.Error("Expected pod to be ungated")
 	}
 }

@@ -341,6 +341,15 @@ func (r EventResource) match(resource EventResource) bool {
 		r == Pod && (resource == assignedPod || resource == unschedulablePod)
 }
 
+func (ce ClusterEvent) MatchAny(events []ClusterEvent) bool {
+	for _, e := range events {
+		if e.Match(ce) {
+			return true
+		}
+	}
+	return false
+}
+
 func UnrollWildCardResource() []ClusterEventWithHint {
 	return []ClusterEventWithHint{
 		{Event: ClusterEvent{Resource: Pod, ActionType: All}},
@@ -380,8 +389,13 @@ type QueuedPodInfo struct {
 	UnschedulablePlugins sets.Set[string]
 	// PendingPlugins records the plugin names that the Pod failed with Pending status.
 	PendingPlugins sets.Set[string]
-	// Whether the Pod is scheduling gated (by PreEnqueuePlugins) or not.
-	Gated bool
+	// GatingPlugin records the plugin name that gated the Pod at PreEnqueue.
+	GatingPlugin string
+}
+
+// Gated returns true if the pod is gated by any plugin.
+func (pqi *QueuedPodInfo) Gated() bool {
+	return pqi.GatingPlugin != ""
 }
 
 // DeepCopy returns a deep copy of the QueuedPodInfo object.
@@ -393,7 +407,6 @@ func (pqi *QueuedPodInfo) DeepCopy() *QueuedPodInfo {
 		InitialAttemptTimestamp: pqi.InitialAttemptTimestamp,
 		UnschedulablePlugins:    pqi.UnschedulablePlugins.Clone(),
 		PendingPlugins:          pqi.PendingPlugins.Clone(),
-		Gated:                   pqi.Gated,
 	}
 }
 
