@@ -957,6 +957,14 @@ const (
 	//
 	// Enables the image volume source.
 	ImageVolume featuregate.Feature = "ImageVolume"
+
+	// owner: @munnerz
+	// kep: https://kep.k8s.io/4742
+	// alpha: v1.32
+	//
+	// Enables the SetPodTopologyLabels admission plugin to automatically set topology labels on pods
+	// when they are scheduled to Nodes.
+	SetPodTopologyLabels featuregate.Feature = "SetPodTopologyLabels"
 )
 
 func init() {
