@@ -233,6 +233,9 @@ type TLSClientConfig struct {
 	// Trusted root certificates for server
 	CAFile string
 
+	// Should we reload the TLS files periodically?
+	ReloadTLSFiles bool
+
 	// CertData holds PEM-encoded bytes (typically read from a client certificate file).
 	// CertData takes precedence over CertFile
 	CertData []byte
@@ -546,6 +549,38 @@ func InClusterConfig() (*Config, error) {
 	}, nil
 }
 
+// AlphaInClusterConfigMTLS loads a credential bundle provisioned by the Alpha
+// Pod Certificates feature, and uses it to connect to kube-apiserver.
+func AlphaInClusterConfigMTLS(caFilePath, credBundlePath string) (*Config, error) {
+	const (
+		tokenFile                 = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+		rootCAFile                = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+		apiClientCredentialBundle = "/var/run/secrets/kubernetes.io/serviceaccount/credentialbundle.pem"
+	)
+	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
+	if len(host) == 0 || len(port) == 0 {
+		return nil, ErrNotInCluster
+	}
+
+	if _, err := certutil.NewPool(caFilePath); err != nil {
+		return nil, fmt.Errorf("while checking CA file: %w", err)
+	}
+
+	if _, err := os.ReadFile(apiClientCredentialBundle); err != nil {
+		return nil, fmt.Errorf("while checking credential bundle: %w", err)
+	}
+
+	return &Config{
+		Host: "https://" + net.JoinHostPort(host, port),
+		TLSClientConfig: TLSClientConfig{
+			CAFile:         caFilePath,
+			CertFile:       credBundlePath,
+			KeyFile:        credBundlePath,
+			ReloadTLSFiles: true,
+		},
+	}, nil
+}
+
 // IsConfigTransportTLS returns true if and only if the provided
 // config will result in a protected connection to the server when it
 // is passed to restclient.RESTClientFor().  Use to determine when to
@@ -610,11 +645,12 @@ func AnonymousClientConfig(config *Config) *Config {
 		APIPath:       config.APIPath,
 		ContentConfig: config.ContentConfig,
 		TLSClientConfig: TLSClientConfig{
-			Insecure:   config.Insecure,
-			ServerName: config.ServerName,
-			CAFile:     config.TLSClientConfig.CAFile,
-			CAData:     config.TLSClientConfig.CAData,
-			NextProtos: config.TLSClientConfig.NextProtos,
+			Insecure:       config.Insecure,
+			ServerName:     config.ServerName,
+			CAFile:         config.TLSClientConfig.CAFile,
+			CAData:         config.TLSClientConfig.CAData,
+			ReloadTLSFiles: config.ReloadTLSFiles,
+			NextProtos:     config.TLSClientConfig.NextProtos,
 		},
 		RateLimiter:        config.RateLimiter,
 		WarningHandler:     config.WarningHandler,
@@ -648,15 +684,16 @@ func CopyConfig(config *Config) *Config {
 		AuthConfigPersister: config.AuthConfigPersister,
 		ExecProvider:        config.ExecProvider,
 		TLSClientConfig: TLSClientConfig{
-			Insecure:   config.TLSClientConfig.Insecure,
-			ServerName: config.TLSClientConfig.ServerName,
-			CertFile:   config.TLSClientConfig.CertFile,
-			KeyFile:    config.TLSClientConfig.KeyFile,
-			CAFile:     config.TLSClientConfig.CAFile,
-			CertData:   config.TLSClientConfig.CertData,
-			KeyData:    config.TLSClientConfig.KeyData,
-			CAData:     config.TLSClientConfig.CAData,
-			NextProtos: config.TLSClientConfig.NextProtos,
+			Insecure:       config.TLSClientConfig.Insecure,
+			ServerName:     config.TLSClientConfig.ServerName,
+			CertFile:       config.TLSClientConfig.CertFile,
+			KeyFile:        config.TLSClientConfig.KeyFile,
+			CAFile:         config.TLSClientConfig.CAFile,
+			CertData:       config.TLSClientConfig.CertData,
+			KeyData:        config.TLSClientConfig.KeyData,
+			CAData:         config.TLSClientConfig.CAData,
+			ReloadTLSFiles: config.ReloadTLSFiles,
+			NextProtos:     config.TLSClientConfig.NextProtos,
 		},
 		UserAgent:          config.UserAgent,
 		DisableCompression: config.DisableCompression,
