@@ -3464,7 +3464,9 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 		err = e2epod.WaitForPodNotFoundInNamespace(context.TODO(), f.ClientSet, pod.Name, pod.Namespace, 120*time.Second)
 		framework.ExpectNoError(err)
 
-		buffer := int64(2)
+		// With Evented PLEG, pod deletion gets delayed by ten secnods at most (issue #124704)
+		// TODO: Revert this buffer to two seconds when this issue is fixed.
+		buffer := int64(10)
 		deleteTime := time.Since(start).Seconds()
 		// should delete quickly and not try to start/wait on any sidecars since they never started
 		gomega.Expect(deleteTime).To(gomega.BeNumerically("<", grace+buffer), fmt.Sprintf("should delete in < %d seconds, took %f", grace+buffer, deleteTime))
