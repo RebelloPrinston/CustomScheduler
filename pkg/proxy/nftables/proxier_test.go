@@ -175,6 +175,7 @@ var baseRules = dedent.Dedent(`
 	add rule ip kube-proxy filter-output ct state new jump service-endpoints-check
 	add rule ip kube-proxy filter-output ct state new jump firewall-check
 	add rule ip kube-proxy filter-output-post-dnat ct state new jump cluster-ips-check
+	add rule ip kube-proxy filter-forward ct original ip daddr @cluster-ips ct state established flow offload @kube-proxy-flowtable
 	add rule ip kube-proxy firewall-check ip daddr . meta l4proto . th dport vmap @firewall-ips
 	add rule ip kube-proxy mark-for-masquerade mark set mark or 0x4000
 	add rule ip kube-proxy masquerading mark and 0x4000 == 0 return
@@ -458,6 +459,9 @@ func TestOverallNFTablesRules(t *testing.T) {
 		# svc6
 		add element ip kube-proxy cluster-ips { 172.30.0.46 }
 		add element ip kube-proxy no-endpoint-services { 172.30.0.46 . tcp . 80 comment "ns6/svc6:p80" : goto reject-chain }
+
+		# flowtables
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
@@ -4028,6 +4032,7 @@ func TestSyncProxyRulesRepeated(t *testing.T) {
 		add chain ip kube-proxy endpoint-7RVP4LUQ-ns2/svc2/tcp/p8080__10.0.2.1/8080
 		add rule ip kube-proxy endpoint-7RVP4LUQ-ns2/svc2/tcp/p8080__10.0.2.1/8080 ip saddr 10.0.2.1 jump mark-for-masquerade
 		add rule ip kube-proxy endpoint-7RVP4LUQ-ns2/svc2/tcp/p8080__10.0.2.1/8080 meta l4proto tcp dnat to 10.0.2.1:8080
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
                 `)
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
 
@@ -4088,6 +4093,7 @@ func TestSyncProxyRulesRepeated(t *testing.T) {
 		add chain ip kube-proxy endpoint-2OCDJSZQ-ns3/svc3/tcp/p80__10.0.3.1/80
 		add rule ip kube-proxy endpoint-2OCDJSZQ-ns3/svc3/tcp/p80__10.0.3.1/80 ip saddr 10.0.3.1 jump mark-for-masquerade
 		add rule ip kube-proxy endpoint-2OCDJSZQ-ns3/svc3/tcp/p80__10.0.3.1/80 meta l4proto tcp dnat to 10.0.3.1:80
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
 	// add 1 element to cluster-ips and service-ips = 2 operations
@@ -4122,6 +4128,7 @@ func TestSyncProxyRulesRepeated(t *testing.T) {
 		add chain ip kube-proxy endpoint-2OCDJSZQ-ns3/svc3/tcp/p80__10.0.3.1/80
 		add rule ip kube-proxy endpoint-2OCDJSZQ-ns3/svc3/tcp/p80__10.0.3.1/80 ip saddr 10.0.3.1 jump mark-for-masquerade
 		add rule ip kube-proxy endpoint-2OCDJSZQ-ns3/svc3/tcp/p80__10.0.3.1/80 meta l4proto tcp dnat to 10.0.3.1:80
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
 	// delete 1 element from cluster-ips and service-ips = 2 operations
@@ -4153,6 +4160,7 @@ func TestSyncProxyRulesRepeated(t *testing.T) {
 		add chain ip kube-proxy endpoint-2OCDJSZQ-ns3/svc3/tcp/p80__10.0.3.1/80
 		add rule ip kube-proxy endpoint-2OCDJSZQ-ns3/svc3/tcp/p80__10.0.3.1/80 ip saddr 10.0.3.1 jump mark-for-masquerade
 		add rule ip kube-proxy endpoint-2OCDJSZQ-ns3/svc3/tcp/p80__10.0.3.1/80 meta l4proto tcp dnat to 10.0.3.1:80
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
 	// delete stale chains happens in a separate transaction, nothing else changed => last transaction will have 0 operations.
@@ -4195,6 +4203,7 @@ func TestSyncProxyRulesRepeated(t *testing.T) {
 		add rule ip kube-proxy endpoint-2OCDJSZQ-ns3/svc3/tcp/p80__10.0.3.1/80 meta l4proto tcp dnat to 10.0.3.1:80
 
 		add element ip kube-proxy no-endpoint-services { 172.30.0.44 . tcp . 80 comment "ns4/svc4:p80" : goto reject-chain }
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
 	// add 1 element to cluster-ips and no-endpoint-services = 2 operations
@@ -4244,6 +4253,7 @@ func TestSyncProxyRulesRepeated(t *testing.T) {
 		add chain ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80
 		add rule ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80 ip saddr 10.0.4.1 jump mark-for-masquerade
 		add rule ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80 meta l4proto tcp dnat to 10.0.4.1:80
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
 	// add 1 element to service-ips, remove 1 element from no-endpoint-services = 2 operations
@@ -4288,6 +4298,7 @@ func TestSyncProxyRulesRepeated(t *testing.T) {
 		add chain ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80
 		add rule ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80 ip saddr 10.0.4.1 jump mark-for-masquerade
 		add rule ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80 meta l4proto tcp dnat to 10.0.4.1:80
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
 	// add+flush 2 chains for service and endpoint, add 2 rules in each = 8 operations
@@ -4336,6 +4347,7 @@ func TestSyncProxyRulesRepeated(t *testing.T) {
 		add chain ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80
 		add rule ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80 ip saddr 10.0.4.1 jump mark-for-masquerade
 		add rule ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80 meta l4proto tcp dnat to 10.0.4.1:80
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
 	// add+flush 3 chains for 1 service and 2 endpoints, add 2 rules in each = 12 operations
@@ -4373,6 +4385,7 @@ func TestSyncProxyRulesRepeated(t *testing.T) {
 		add chain ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80
 		add rule ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80 ip saddr 10.0.4.1 jump mark-for-masquerade
 		add rule ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80 meta l4proto tcp dnat to 10.0.4.1:80
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
 	// remove 1 element from service-ips, add 1 element to no-endpoint-services = 2 operations
@@ -4420,6 +4433,7 @@ func TestSyncProxyRulesRepeated(t *testing.T) {
 		add chain ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80
 		add rule ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80 ip saddr 10.0.4.1 jump mark-for-masquerade
 		add rule ip kube-proxy endpoint-WAHRBT2B-ns4/svc4/tcp/p80__10.0.4.1/80 meta l4proto tcp dnat to 10.0.4.1:80
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())
 	// remove 1 element from no-endpoint-services, add 1 element to service-ips = 2 operations
@@ -4958,6 +4972,7 @@ func TestBadIPs(t *testing.T) {
 		add element ip kube-proxy service-ips { 1.2.3.4 . tcp . 80 : goto external-ULMVA6XW-ns1/svc1/tcp/p80 }
 		add element ip kube-proxy service-nodeports { tcp . 3001 : goto external-ULMVA6XW-ns1/svc1/tcp/p80 }
 		add element ip kube-proxy firewall-ips { 1.2.3.4 . tcp . 80 : goto firewall-ULMVA6XW-ns1/svc1/tcp/p80 }
+		add flowtable ip kube-proxy kube-proxy-flowtable { }
 		`)
 
 	assertNFTablesTransactionEqual(t, getLine(), expected, nft.Dump())

@@ -83,6 +83,14 @@ type KubeProxyNFTablesConfiguration struct {
 	// masqueradeBit is the bit of the iptables fwmark space to use for SNAT if using
 	// the nftables proxy mode. Values must be within the range [0, 31].
 	MasqueradeBit *int32
+
+	// AcceleratedInterfaceExpression is a CEL expression to match on network interfaces
+	// that will be used for accelerated datapath.
+	// The interface.name and interface.type as reported by the OS are exposed, per example:
+	// interface.name.startsWith("eth") or interface.type == "veth"
+	// Only non-loopback interfaces are with administrative state UP are considered.
+	// If empty non interface is selected.
+	AcceleratedInterfaceExpression string
 }
 
 // KubeProxyConntrackConfiguration contains conntrack settings for

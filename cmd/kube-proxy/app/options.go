@@ -171,6 +171,9 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.Int32Var(&o.metricsPort, "metrics-port", o.metricsPort, "The port to bind the metrics server. Use 0 to disable.")
 	_ = fs.MarkDeprecated("metrics-port", "This flag is deprecated and will be removed in a future release. Please use --metrics-bind-address instead.")
 
+	fs.StringVar(&o.config.NFTables.AcceleratedInterfaceExpression, "accelerated-interfaces-expression", o.config.NFTables.AcceleratedInterfaceExpression,
+		"A CEL expression to match on network interfaces that will be used for the accelerated datapath. The interface.name and interface.type as reported by the OS are exposed, per example: interface.name.startsWith(\"eth\") or interface.type == \"veth\". Only non-loopback interfaces with administrative state UP are considered. If empty no interface is selected. This parameter is ignored if a config file is specified by --config or the proxy mode is not nftables.")
+
 	logsapi.AddFlags(&o.config.Logging, fs)
 }
 
