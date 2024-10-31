@@ -41,6 +41,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 	"go.opentelemetry.io/otel/trace"
+
 	"k8s.io/client-go/informers"
 	"k8s.io/mount-utils"
 
@@ -111,6 +112,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/server"
 	servermetrics "k8s.io/kubernetes/pkg/kubelet/server/metrics"
 	serverstats "k8s.io/kubernetes/pkg/kubelet/server/stats"
+	"k8s.io/kubernetes/pkg/kubelet/serviceaccount"
 	"k8s.io/kubernetes/pkg/kubelet/stats"
 	"k8s.io/kubernetes/pkg/kubelet/status"
 	"k8s.io/kubernetes/pkg/kubelet/sysctl"
@@ -709,6 +711,13 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		}
 	}
 
+	tokenManager := token.NewManager(kubeDeps.KubeClient)
+	if utilfeature.DefaultFeatureGate.Enabled(features.KubeletServiceAccountTokenForCredentialProviders) {
+		klet.serviceAccountManager = serviceaccount.NewWatchingServiceAccountManager(kubeDeps.KubeClient)
+	} else {
+		klet.serviceAccountManager = &serviceaccount.NoopManager{}
+	}
+
 	runtime, err := kuberuntime.NewKubeGenericRuntimeManager(
 		kubecontainer.FilterEventRecorder(kubeDeps.Recorder),
 		klet.livenessManager,
@@ -742,6 +751,8 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		*kubeCfg.MemoryThrottlingFactor,
 		kubeDeps.PodStartupLatencyTracker,
 		kubeDeps.TracerProvider,
+		tokenManager,
+		klet.serviceAccountManager,
 	)
 	if err != nil {
 		return nil, err
@@ -870,8 +881,6 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 			klet.runner,
 			kubeDeps.Recorder)
 	}
-
-	tokenManager := token.NewManager(kubeDeps.KubeClient)
 
 	var clusterTrustBundleManager clustertrustbundle.Manager
 	if kubeDeps.KubeClient != nil && utilfeature.DefaultFeatureGate.Enabled(features.ClusterTrustBundleProjection) {
@@ -1416,6 +1425,9 @@ type Kubelet struct {
 
 	// Health check kubelet
 	healthChecker watchdog.HealthChecker
+
+	// serviceAccountManager caches the serviceaccount used by running pods on this node.
+	serviceAccountManager serviceaccount.Manager
 }
 
 // ListPodStats is delegated to StatsProvider, which implements stats.Provider interface
@@ -1929,6 +1941,9 @@ func (kl *Kubelet) SyncPod(ctx context.Context, updateType kubetypes.SyncPodType
 		if kl.configMapManager != nil {
 			kl.configMapManager.RegisterPod(pod)
 		}
+		if utilfeature.DefaultFeatureGate.Enabled(features.KubeletServiceAccountTokenForCredentialProviders) && kl.serviceAccountManager != nil {
+			kl.serviceAccountManager.RegisterPod(pod)
+		}
 	}
 
 	// Create Cgroups for the pod and apply resource parameters
@@ -2233,6 +2248,9 @@ func (kl *Kubelet) SyncTerminatedPod(ctx context.Context, pod *v1.Pod, podStatus
 	}
 	if kl.configMapManager != nil {
 		kl.configMapManager.UnregisterPod(pod)
+	}
+	if utilfeature.DefaultFeatureGate.Enabled(features.KubeletServiceAccountTokenForCredentialProviders) && kl.serviceAccountManager != nil {
+		kl.serviceAccountManager.UnregisterPod(pod)
 	}
 
 	// Note: we leave pod containers to be reclaimed in the background since dockershim requires the
