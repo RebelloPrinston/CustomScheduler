@@ -59847,8 +59847,16 @@ func schema_k8sio_kube_proxy_config_v1alpha1_KubeProxyNFTablesConfiguration(ref 
 							Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.Duration"),
 						},
 					},
+					"acceleratedInterfaceExpression": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratedInterfaceExpression is a CEL expression to match on network interfaces that will be used for accelerated datapath. The interface.name and interface.type as reported by the OS are exposed, per example: interface.name.startsWith(\"eth\") or interface.type == \"veth\" Only non-loopback interfaces are with administrative state UP are considered. If empty non interface is selected.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
-				Required: []string{"masqueradeBit", "masqueradeAll", "syncPeriod", "minSyncPeriod"},
+				Required: []string{"masqueradeBit", "masqueradeAll", "syncPeriod", "minSyncPeriod", "acceleratedInterfaceExpression"},
 			},
 		},
 		Dependencies: []string{

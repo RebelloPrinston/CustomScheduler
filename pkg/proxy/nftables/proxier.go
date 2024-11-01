@@ -37,6 +37,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/time/rate"
+
+	"github.com/google/cel-go/cel"
+	celtypes "github.com/google/cel-go/common/types"
+	"github.com/vishvananda/netlink"
+
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -101,6 +107,9 @@ const (
 	// masquerading
 	markMasqChain     = "mark-for-masquerade"
 	masqueradingChain = "masquerading"
+
+	// flowtables
+	serviceFlowTable = "kube-proxy-flowtable"
 )
 
 // NewDualStackProxier creates a MetaProxier instance, with IPv4 and IPv6 proxies.
@@ -116,13 +125,14 @@ func NewDualStackProxier(
 	recorder events.EventRecorder,
 	healthzServer *healthcheck.ProxierHealthServer,
 	nodePortAddresses []string,
+	acceleratedInterfaceExpression string,
 	initOnly bool,
 ) (proxy.Provider, error) {
 	// Create an ipv4 instance of the single-stack proxier
 	ipv4Proxier, err := NewProxier(ctx, v1.IPv4Protocol,
 		syncPeriod, minSyncPeriod, masqueradeAll, masqueradeBit,
 		localDetectors[v1.IPv4Protocol], hostname, nodeIPs[v1.IPv4Protocol],
-		recorder, healthzServer, nodePortAddresses, initOnly)
+		recorder, healthzServer, nodePortAddresses, acceleratedInterfaceExpression, initOnly)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create ipv4 proxier: %v", err)
 	}
@@ -130,7 +140,7 @@ func NewDualStackProxier(
 	ipv6Proxier, err := NewProxier(ctx, v1.IPv6Protocol,
 		syncPeriod, minSyncPeriod, masqueradeAll, masqueradeBit,
 		localDetectors[v1.IPv6Protocol], hostname, nodeIPs[v1.IPv6Protocol],
-		recorder, healthzServer, nodePortAddresses, initOnly)
+		recorder, healthzServer, nodePortAddresses, acceleratedInterfaceExpression, initOnly)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create ipv6 proxier: %v", err)
 	}
@@ -195,6 +205,7 @@ type Proxier struct {
 
 	logger klog.Logger
 
+	accelIfacePrg       cel.Program
 	clusterIPs          *nftElementStorage
 	serviceIPs          *nftElementStorage
 	firewallIPs         *nftElementStorage
@@ -221,6 +232,7 @@ func NewProxier(ctx context.Context,
 	recorder events.EventRecorder,
 	healthzServer *healthcheck.ProxierHealthServer,
 	nodePortAddressStrings []string,
+	acceleratedInterfaceExpression string,
 	initOnly bool,
 ) (*Proxier, error) {
 	logger := klog.LoggerWithValues(klog.FromContext(ctx), "ipFamily", ipFamily)
@@ -233,6 +245,26 @@ func NewProxier(ctx context.Context,
 	if initOnly {
 		logger.Info("System initialized and --init-only specified")
 		return nil, nil
+	}
+
+	// validate the cel expression and generate the CEL program
+	var accelIfacePrg cel.Program
+	if len(acceleratedInterfaceExpression) > 0 {
+		env, err := cel.NewEnv(
+			cel.Variable("interface.name", cel.StringType),
+			cel.Variable("interface.type", cel.StringType),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("cel env creation err: %w", err)
+		}
+		ast, issues := env.Compile(acceleratedInterfaceExpression)
+		if issues != nil && issues.Err() != nil {
+			return nil, fmt.Errorf("cel type-check error: %w", issues.Err())
+		}
+		accelIfacePrg, err = env.Program(ast)
+		if err != nil {
+			return nil, fmt.Errorf("cel program construction error: %w", err)
+		}
 	}
 
 	// Generate the masquerade mark to use for SNAT rules.
@@ -272,6 +304,7 @@ func NewProxier(ctx context.Context,
 		noEndpointServices:  newNFTElementStorage("map", noEndpointServicesMap),
 		noEndpointNodePorts: newNFTElementStorage("map", noEndpointNodePortsMap),
 		serviceNodePorts:    newNFTElementStorage("map", serviceNodePortsMap),
+		accelIfacePrg:       accelIfacePrg,
 	}
 
 	burstSyncs := 2
@@ -707,6 +740,22 @@ func (proxier *Proxier) setupNFTables(tx *knftables.Transaction) {
 		})
 	}
 
+	// Offload all Services established connections.
+	// Theoretically all established connections could be offloaded
+	// but using the Separation of Concerns principle, we only
+	// care about the bits we are carrying in kube-proxy.
+	tx.Add(&knftables.Flowtable{
+		Name: serviceFlowTable,
+	})
+	tx.Add(&knftables.Rule{
+		Chain: filterForwardChain,
+		Rule: knftables.Concat(
+			"ct original", ipX, "daddr", "@", clusterIPsSet,
+			"ct state established",
+			"flow offload", "@", serviceFlowTable,
+		),
+	})
+
 	// flush containers
 	proxier.clusterIPs.reset(tx)
 	proxier.serviceIPs.reset(tx)
@@ -747,11 +796,107 @@ func (proxier *Proxier) Sync() {
 	proxier.syncRunner.Run()
 }
 
+func (proxier *Proxier) syncAcceleratedInterfaces() {
+	minInterval := 5 * time.Second
+	maxInterval := 1 * time.Minute
+	rateLimiter := rate.NewLimiter(rate.Every(minInterval), 1)
+	// Resources are published periodically or if there is a netlink notification
+	// indicating a new interfaces was added or changed
+	nlChannel := make(chan netlink.LinkUpdate)
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+	if err := netlink.LinkSubscribe(nlChannel, doneCh); err != nil {
+		proxier.logger.Error(err, "error subscribing to netlink interfaces, only syncing periodically", "interval", maxInterval.String())
+	}
+
+	for {
+		err := rateLimiter.Wait(context.Background())
+		if err != nil {
+			proxier.logger.Error(err, "unexpected rate limited error trying to get system interfaces")
+		}
+		ifnames, err := proxier.getAcceleratedInterfaces()
+		if err != nil {
+			proxier.logger.Error(err, "failed to list system network interfaces")
+		}
+		if len(ifnames) > 0 {
+			tx := proxier.nftables.NewTransaction()
+			tx.Add(&knftables.Flowtable{
+				Name:    serviceFlowTable,
+				Devices: ifnames,
+			})
+			err := proxier.nftables.Run(context.Background(), tx)
+			if err != nil {
+				proxier.logger.Error(err, "failed to add network interfaces to the flowtable")
+			}
+		}
+
+		select {
+		// trigger a reconcile
+		case <-nlChannel:
+			// drain the channel so we only sync once
+			for len(nlChannel) > 0 {
+				<-nlChannel
+			}
+		case <-time.After(maxInterval):
+		}
+	}
+
+}
+
+func (proxier *Proxier) getAcceleratedInterfaces() ([]string, error) {
+	ifNames := []string{}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ifNames, err
+	}
+
+	for _, iface := range ifaces {
+		klog.V(7).InfoS("Checking network interface", "name", iface.Name)
+		// skip down interfaces
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		// skip loopback interfaces
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		var ifaceType string
+		link, err := netlink.LinkByName(iface.Name)
+		// allow to match only by name if it is not possible to get the type
+		if err != nil {
+			klog.ErrorS(err, "error getting link by name")
+		} else {
+			ifaceType = link.Type()
+		}
+
+		klog.V(7).InfoS("Checking network interface", "name", iface.Name, "type", ifaceType)
+		out, _, err := proxier.accelIfacePrg.Eval(map[string]interface{}{
+			"interface.name": iface.Name,
+			"interface.type": ifaceType})
+		if err != nil {
+			klog.ErrorS(err, "error evaluation interface", "name", iface.Name)
+			continue
+		}
+		if out == celtypes.True {
+			klog.V(7).InfoS("Adding network interface", "name", iface.Name)
+			ifNames = append(ifNames, iface.Name)
+		}
+	}
+
+	return ifNames, nil
+}
+
 // SyncLoop runs periodic work.  This is expected to run as a goroutine or as the main loop of the app.  It does not return.
 func (proxier *Proxier) SyncLoop() {
 	// Update healthz timestamp at beginning in case Sync() never succeeds.
 	if proxier.healthzServer != nil {
 		proxier.healthzServer.Updated(proxier.ipFamily)
+	}
+
+	if proxier.accelIfacePrg != nil {
+		go proxier.syncAcceleratedInterfaces()
 	}
 
 	// synthesize "last change queued" time as the informers are syncing.

@@ -94,6 +94,13 @@ type KubeProxyNFTablesConfiguration struct {
 	// '1m', '2h22m'). A value of 0 means every Service or EndpointSlice change will
 	// result in an immediate iptables resync.
 	MinSyncPeriod metav1.Duration `json:"minSyncPeriod"`
+	// AcceleratedInterfaceExpression is a CEL expression to match on network interfaces
+	// that will be used for accelerated datapath.
+	// The interface.name and interface.type as reported by the OS are exposed, per example:
+	// interface.name.startsWith("eth") or interface.type == "veth"
+	// Only non-loopback interfaces are with administrative state UP are considered.
+	// If empty non interface is selected.
+	AcceleratedInterfaceExpression string `json:"acceleratedInterfaceExpression"`
 }
 
 // KubeProxyConntrackConfiguration contains conntrack settings for
