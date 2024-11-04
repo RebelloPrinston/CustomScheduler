@@ -26,6 +26,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubeapiserver/options"
 	certapproval "k8s.io/kubernetes/plugin/pkg/admission/certificates/approval"
 	"k8s.io/kubernetes/plugin/pkg/admission/certificates/ctbattest"
+	"k8s.io/kubernetes/plugin/pkg/admission/certificates/pcrsigning"
 	certsigning "k8s.io/kubernetes/plugin/pkg/admission/certificates/signing"
 	certsubjectrestriction "k8s.io/kubernetes/plugin/pkg/admission/certificates/subjectrestriction"
 	"k8s.io/kubernetes/plugin/pkg/admission/defaulttolerationseconds"
@@ -43,6 +44,7 @@ func DefaultOffAdmissionPlugins() sets.Set[string] {
 		resourcequota.PluginName,             // ResourceQuota
 		certapproval.PluginName,              // CertificateApproval
 		certsigning.PluginName,               // CertificateSigning
+		pcrsigning.PluginName,                // PodCertificateRequestSigning, gated by the PodCertificateRequest feature gate
 		ctbattest.PluginName,                 // ClusterTrustBundleAttest
 		certsubjectrestriction.PluginName,    // CertificateSubjectRestriction
 		validatingadmissionpolicy.PluginName, // ValidatingAdmissionPolicy, only active when feature gate ValidatingAdmissionPolicy is enabled

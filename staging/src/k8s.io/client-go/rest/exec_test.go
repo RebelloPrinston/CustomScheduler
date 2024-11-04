@@ -278,6 +278,7 @@ func TestConfigToExecClusterRoundtrip(t *testing.T) {
 		expected.TLSClientConfig.CertFile = ""
 		expected.TLSClientConfig.KeyFile = ""
 		expected.TLSClientConfig.CAFile = ""
+		expected.TLSClientConfig.ReloadTLSFiles = false
 		expected.TLSClientConfig.CertData = nil
 		expected.TLSClientConfig.KeyData = nil
 		expected.TLSClientConfig.NextProtos = nil

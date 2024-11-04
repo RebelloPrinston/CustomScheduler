@@ -163,6 +163,10 @@ func GetEtcdStorageDataForNamespace(namespace string) map[schema.GroupVersionRes
 			Stub:             `{"metadata": {"name": "example.com:signer:abc"}, "spec": {"signerName":"example.com/signer", "trustBundle": "-----BEGIN CERTIFICATE-----\nMIIBBDCBt6ADAgECAgEAMAUGAytlcDAQMQ4wDAYDVQQDEwVyb290MTAiGA8wMDAx\nMDEwMTAwMDAwMFoYDzAwMDEwMTAxMDAwMDAwWjAQMQ4wDAYDVQQDEwVyb290MTAq\nMAUGAytlcAMhAF2MoFeGa97gK2NGT1h6p1/a1GlMXAXbcjI/OShyIobPozIwMDAP\nBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTWDdK2CNQiHqRjPaAWYPPtIykQgjAF\nBgMrZXADQQCtom9WGl7m2SAa4tXM9Soo/mbInBsRhn187BMoqTAHInHchKup5/3y\nl1tYJSZZsEXnXrCvw2qLCBNif6+2YYgE\n-----END CERTIFICATE-----\n"}}`,
 			ExpectedEtcdPath: "/registry/clustertrustbundles/example.com:signer:abc",
 		},
+		gvr("certificates.k8s.io", "v1alpha1", "podcertificaterequests"): {
+			Stub:             `{"metadata": {"name": "pcr1"}, "spec": {"signerName":"example.com/signer", "podName": "pod1", "podUID": "poduid1", "serviceAccountName": "sa1", "serviceAccountUID": "sauid1", "nodeName": "node1", "nodeUID": "nodeuid1", "maxExpirationSeconds": 86400, "pkixPublicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE29N1KVaUGFU8O1Xd1v6YP190TO8X6X03KKIjLdNQHV1bl/ZEZsFM5eahrUFbt8JikMVWPv3yExff2gwtIU0CrQ==", "proofOfPossession": "MEUCIQCyT8WEH8TD3QcBr7MLSygdrnNZ+aSbVVGg8/3G7YBsRQIgTaeaUu31DS/bHinEPhIT8H0enEbGABLBtm44ixaJ1FM="}}`,
+			ExpectedEtcdPath: "/registry/podcertificaterequests/pcr1",
+		},
 		// --
 
 		// k8s.io/kubernetes/pkg/apis/coordination/v1

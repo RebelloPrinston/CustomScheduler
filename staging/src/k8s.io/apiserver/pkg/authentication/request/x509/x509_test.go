@@ -750,7 +750,7 @@ func TestX509(t *testing.T) {
 			}
 
 			// this effectively tests the simple dynamic verify function.
-			a := New(testCase.Opts, testCase.User)
+			a := New(testCase.Opts, []UserConversion{testCase.User})
 
 			resp, ok, err := a.AuthenticateRequest(req)
 
