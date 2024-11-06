@@ -46,8 +46,7 @@ func TestBeforeSynced(t *testing.T) {
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(kc, 0)
 
-	ctbInformer := informerFactory.Certificates().V1beta1().ClusterTrustBundles()
-	ctbManager, _ := NewInformerManager(tCtx, ctbInformer, 256, 5*time.Minute)
+	ctbManager, _ := NewBetaInformerManager(tCtx, informerFactory, 256, 5*time.Minute)
 
 	_, err := ctbManager.GetTrustAnchorsByName("foo", false)
 	if err == nil {
@@ -82,10 +81,10 @@ func TestGetTrustAnchorsByName(t *testing.T) {
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(kc, 0)
 
-	ctbInformer := informerFactory.Certificates().V1beta1().ClusterTrustBundles()
-	ctbManager, _ := NewInformerManager(tCtx, ctbInformer, 256, 5*time.Minute)
+	ctbManager, _ := NewBetaInformerManager(tCtx, informerFactory, 256, 5*time.Minute)
 
 	informerFactory.Start(ctx.Done())
+	ctbInformer := informerFactory.Certificates().V1beta1().ClusterTrustBundles()
 	if !cache.WaitForCacheSync(ctx.Done(), ctbInformer.Informer().HasSynced) {
 		t.Fatalf("Timed out waiting for informer to sync")
 	}
@@ -146,10 +145,10 @@ func TestGetTrustAnchorsByNameCaching(t *testing.T) {
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(kc, 0)
 
-	ctbInformer := informerFactory.Certificates().V1beta1().ClusterTrustBundles()
-	ctbManager, _ := NewInformerManager(tCtx, ctbInformer, 256, 5*time.Minute)
+	ctbManager, _ := NewBetaInformerManager(tCtx, informerFactory, 256, 5*time.Minute)
 
 	informerFactory.Start(ctx.Done())
+	ctbInformer := informerFactory.Certificates().V1beta1().ClusterTrustBundles()
 	if !cache.WaitForCacheSync(ctx.Done(), ctbInformer.Informer().HasSynced) {
 		t.Fatalf("Timed out waiting for informer to sync")
 	}
@@ -221,10 +220,10 @@ func TestGetTrustAnchorsBySignerName(t *testing.T) {
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(kc, 0)
 
-	ctbInformer := informerFactory.Certificates().V1beta1().ClusterTrustBundles()
-	ctbManager, _ := NewInformerManager(tCtx, ctbInformer, 256, 5*time.Minute)
+	ctbManager, _ := NewBetaInformerManager(tCtx, informerFactory, 256, 5*time.Minute)
 
 	informerFactory.Start(ctx.Done())
+	ctbInformer := informerFactory.Certificates().V1beta1().ClusterTrustBundles()
 	if !cache.WaitForCacheSync(ctx.Done(), ctbInformer.Informer().HasSynced) {
 		t.Fatalf("Timed out waiting for informer to sync")
 	}
@@ -335,10 +334,10 @@ func TestGetTrustAnchorsBySignerNameCaching(t *testing.T) {
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(kc, 0)
 
-	ctbInformer := informerFactory.Certificates().V1beta1().ClusterTrustBundles()
-	ctbManager, _ := NewInformerManager(tCtx, ctbInformer, 256, 5*time.Minute)
+	ctbManager, _ := NewBetaInformerManager(tCtx, informerFactory, 256, 5*time.Minute)
 
 	informerFactory.Start(ctx.Done())
+	ctbInformer := informerFactory.Certificates().V1beta1().ClusterTrustBundles()
 	if !cache.WaitForCacheSync(ctx.Done(), ctbInformer.Informer().HasSynced) {
 		t.Fatalf("Timed out waiting for informer to sync")
 	}
