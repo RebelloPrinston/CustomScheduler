@@ -140,6 +140,9 @@
         "sigs.k8s.io/kustomize/api",
         "sigs.k8s.io/kustomize/kustomize/v5"
       ],
+      "github.com/xeipuuv/gojsonschema": [
+        "github.com/opencontainers/image-spec"
+      ],
       "go.opencensus.io": [
         "github.com/Microsoft/hnslib"
       ],
