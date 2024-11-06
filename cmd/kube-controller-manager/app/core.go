@@ -184,6 +184,7 @@ func newNodeLifecycleControllerDescriptor() *ControllerDescriptor {
 func startNodeLifecycleController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	lifecycleController, err := lifecyclecontroller.NewNodeLifecycleController(
 		ctx,
+		controllerName,
 		controllerContext.InformerFactory.Coordination().V1().Leases(),
 		controllerContext.InformerFactory.Core().V1().Pods(),
 		controllerContext.InformerFactory.Core().V1().Nodes(),
@@ -218,11 +219,11 @@ func newTaintEvictionControllerDescriptor() *ControllerDescriptor {
 func startTaintEvictionController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	taintEvictionController, err := tainteviction.New(
 		ctx,
+		controllerName,
 		// taint-manager uses existing cluster role from node-controller
 		controllerContext.ClientBuilder.ClientOrDie("node-controller"),
 		controllerContext.InformerFactory.Core().V1().Pods(),
 		controllerContext.InformerFactory.Core().V1().Nodes(),
-		controllerName,
 	)
 	if err != nil {
 		return nil, false, err
@@ -277,6 +278,7 @@ func startPersistentVolumeBinderController(ctx context.Context, controllerContex
 	}
 
 	params := persistentvolumecontroller.ControllerParameters{
+		ControllerName:            controllerName,
 		KubeClient:                controllerContext.ClientBuilder.ClientOrDie("persistent-volume-binder"),
 		SyncPeriod:                controllerContext.ComponentConfig.PersistentVolumeBinderController.PVClaimBinderSyncPeriod.Duration,
 		VolumePlugins:             plugins,
@@ -317,6 +319,7 @@ func startPersistentVolumeAttachDetachController(ctx context.Context, controller
 	attachDetachController, attachDetachControllerErr :=
 		attachdetach.NewAttachDetachController(
 			ctx,
+			controllerName,
 			controllerContext.ClientBuilder.ClientOrDie("attachdetach-controller"),
 			controllerContext.InformerFactory.Core().V1().Pods(),
 			controllerContext.InformerFactory.Core().V1().Nodes(),
@@ -357,6 +360,7 @@ func startPersistentVolumeExpanderController(ctx context.Context, controllerCont
 
 	expandController, expandControllerErr := expand.NewExpandController(
 		ctx,
+		controllerName,
 		controllerContext.ClientBuilder.ClientOrDie("expand-controller"),
 		controllerContext.InformerFactory.Core().V1().PersistentVolumeClaims(),
 		plugins,
@@ -382,6 +386,7 @@ func newEphemeralVolumeControllerDescriptor() *ControllerDescriptor {
 func startEphemeralVolumeController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	ephemeralController, err := ephemeral.NewController(
 		ctx,
+		controllerName,
 		controllerContext.ClientBuilder.ClientOrDie("ephemeral-volume-controller"),
 		controllerContext.InformerFactory.Core().V1().Pods(),
 		controllerContext.InformerFactory.Core().V1().PersistentVolumeClaims())
@@ -408,6 +413,7 @@ func newResourceClaimControllerDescriptor() *ControllerDescriptor {
 func startResourceClaimController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	ephemeralController, err := resourceclaim.NewController(
 		klog.FromContext(ctx),
+		controllerName,
 		utilfeature.DefaultFeatureGate.Enabled(features.DRAAdminAccess),
 		controllerContext.ClientBuilder.ClientOrDie("resource-claim-controller"),
 		controllerContext.InformerFactory.Core().V1().Pods(),
@@ -431,6 +437,7 @@ func newEndpointsControllerDescriptor() *ControllerDescriptor {
 func startEndpointsController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	go endpointcontroller.NewEndpointController(
 		ctx,
+		controllerName,
 		controllerContext.InformerFactory.Core().V1().Pods(),
 		controllerContext.InformerFactory.Core().V1().Services(),
 		controllerContext.InformerFactory.Core().V1().Endpoints(),
@@ -451,6 +458,7 @@ func newReplicationControllerDescriptor() *ControllerDescriptor {
 func startReplicationController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	go replicationcontroller.NewReplicationManager(
 		ctx,
+		controllerName,
 		controllerContext.InformerFactory.Core().V1().Pods(),
 		controllerContext.InformerFactory.Core().V1().ReplicationControllers(),
 		controllerContext.ClientBuilder.ClientOrDie("replication-controller"),
@@ -470,6 +478,7 @@ func newPodGarbageCollectorControllerDescriptor() *ControllerDescriptor {
 func startPodGarbageCollectorController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	go podgc.NewPodGC(
 		ctx,
+		controllerName,
 		controllerContext.ClientBuilder.ClientOrDie("pod-garbage-collector"),
 		controllerContext.InformerFactory.Core().V1().Pods(),
 		controllerContext.InformerFactory.Core().V1().Nodes(),
@@ -494,6 +503,7 @@ func startResourceQuotaController(ctx context.Context, controllerContext Control
 	quotaConfiguration := quotainstall.NewQuotaConfigurationForControllers(listerFuncForResource)
 
 	resourceQuotaControllerOptions := &resourcequotacontroller.ControllerOptions{
+		ControllerName:            controllerName,
 		QuotaClient:               resourceQuotaControllerClient.CoreV1(),
 		ResourceQuotaInformer:     controllerContext.InformerFactory.Core().V1().ResourceQuotas(),
 		ResyncPeriod:              pkgcontroller.StaticResyncPeriodFunc(controllerContext.ComponentConfig.ResourceQuotaController.ResourceQuotaSyncPeriod.Duration),
@@ -533,10 +543,10 @@ func startNamespaceController(ctx context.Context, controllerContext ControllerC
 	nsKubeconfig.QPS *= 20
 	nsKubeconfig.Burst *= 100
 	namespaceKubeClient := clientset.NewForConfigOrDie(nsKubeconfig)
-	return startModifiedNamespaceController(ctx, controllerContext, namespaceKubeClient, nsKubeconfig)
+	return startModifiedNamespaceController(ctx, controllerName, controllerContext, namespaceKubeClient, nsKubeconfig)
 }
 
-func startModifiedNamespaceController(ctx context.Context, controllerContext ControllerContext, namespaceKubeClient clientset.Interface, nsKubeconfig *restclient.Config) (controller.Interface, bool, error) {
+func startModifiedNamespaceController(ctx context.Context, controllerName string, controllerContext ControllerContext, namespaceKubeClient clientset.Interface, nsKubeconfig *restclient.Config) (controller.Interface, bool, error) {
 
 	metadataClient, err := metadata.NewForConfig(nsKubeconfig)
 	if err != nil {
@@ -547,6 +557,7 @@ func startModifiedNamespaceController(ctx context.Context, controllerContext Con
 
 	namespaceController := namespacecontroller.NewNamespaceController(
 		ctx,
+		controllerName,
 		namespaceKubeClient,
 		metadataClient,
 		discoverResourcesFn,
@@ -569,6 +580,7 @@ func newServiceAccountControllerDescriptor() *ControllerDescriptor {
 
 func startServiceAccountController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	sac, err := serviceaccountcontroller.NewServiceAccountsController(
+		controllerName,
 		controllerContext.InformerFactory.Core().V1().ServiceAccounts(),
 		controllerContext.InformerFactory.Core().V1().Namespaces(),
 		controllerContext.ClientBuilder.ClientOrDie("service-account-controller"),
@@ -592,6 +604,7 @@ func newTTLControllerDescriptor() *ControllerDescriptor {
 func startTTLController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	go ttlcontroller.NewTTLController(
 		ctx,
+		controllerName,
 		controllerContext.InformerFactory.Core().V1().Nodes(),
 		controllerContext.ClientBuilder.ClientOrDie("ttl-controller"),
 	).Run(ctx, 5)
@@ -625,6 +638,7 @@ func startGarbageCollectorController(ctx context.Context, controllerContext Cont
 
 	garbageCollector, err := garbagecollector.NewComposedGarbageCollector(
 		ctx,
+		controllerName,
 		gcClientset,
 		metadataClient,
 		controllerContext.RESTMapper,
@@ -657,6 +671,7 @@ func newPersistentVolumeClaimProtectionControllerDescriptor() *ControllerDescrip
 func startPersistentVolumeClaimProtectionController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	pvcProtectionController, err := pvcprotection.NewPVCProtectionController(
 		klog.FromContext(ctx),
+		controllerName,
 		controllerContext.InformerFactory.Core().V1().PersistentVolumeClaims(),
 		controllerContext.InformerFactory.Core().V1().Pods(),
 		controllerContext.ClientBuilder.ClientOrDie("pvc-protection-controller"),
@@ -679,6 +694,7 @@ func newPersistentVolumeProtectionControllerDescriptor() *ControllerDescriptor {
 func startPersistentVolumeProtectionController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	go pvprotection.NewPVProtectionController(
 		klog.FromContext(ctx),
+		controllerName,
 		controllerContext.InformerFactory.Core().V1().PersistentVolumes(),
 		controllerContext.ClientBuilder.ClientOrDie("pv-protection-controller"),
 	).Run(ctx, 1)
@@ -721,6 +737,7 @@ func newTTLAfterFinishedControllerDescriptor() *ControllerDescriptor {
 func startTTLAfterFinishedController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	go ttlafterfinished.New(
 		ctx,
+		controllerName,
 		controllerContext.InformerFactory.Batch().V1().Jobs(),
 		controllerContext.ClientBuilder.ClientOrDie("ttl-after-finished-controller"),
 	).Run(ctx, int(controllerContext.ComponentConfig.TTLAfterFinishedController.ConcurrentTTLSyncs))
@@ -738,6 +755,7 @@ func newLegacyServiceAccountTokenCleanerControllerDescriptor() *ControllerDescri
 func startLegacyServiceAccountTokenCleanerController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	cleanUpPeriod := controllerContext.ComponentConfig.LegacySATokenCleaner.CleanUpPeriod.Duration
 	legacySATokenCleaner, err := serviceaccountcontroller.NewLegacySATokenCleaner(
+		controllerName,
 		controllerContext.InformerFactory.Core().V1().ServiceAccounts(),
 		controllerContext.InformerFactory.Core().V1().Secrets(),
 		controllerContext.InformerFactory.Core().V1().Pods(),
@@ -746,7 +764,8 @@ func startLegacyServiceAccountTokenCleanerController(ctx context.Context, contro
 		serviceaccountcontroller.LegacySATokenCleanerOptions{
 			CleanUpPeriod: cleanUpPeriod,
 			SyncInterval:  serviceaccountcontroller.DefaultCleanerSyncInterval,
-		})
+		},
+	)
 	if err != nil {
 		return nil, true, fmt.Errorf("failed to start the legacy service account token cleaner: %v", err)
 	}
@@ -885,6 +904,7 @@ func newStorageVersionGarbageCollectorControllerDescriptor() *ControllerDescript
 func startStorageVersionGarbageCollectorController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	go storageversiongc.NewStorageVersionGC(
 		ctx,
+		controllerName,
 		controllerContext.ClientBuilder.ClientOrDie("storage-version-garbage-collector"),
 		controllerContext.InformerFactory.Coordination().V1().Leases(),
 		controllerContext.InformerFactory.Internal().V1alpha1().StorageVersions(),
