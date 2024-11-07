@@ -24,8 +24,10 @@ import (
 	kubeletconfigv1beta1 "k8s.io/kubelet/config/v1beta1"
 
 	// TODO: Cut references to k8s.io/kubernetes, eventually there should be none from this package
+	"k8s.io/component-base/featuregate"
 	logsapi "k8s.io/component-base/logs/api/v1"
 	"k8s.io/kubernetes/pkg/cluster/ports"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/kubelet/qos"
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/utils/ptr"
@@ -39,6 +41,8 @@ const (
 	DefaultPodLogsDir            = "/var/log/pods"
 	// See https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/2570-memory-qos
 	DefaultMemoryThrottlingFactor = 0.9
+	// MaxContainerBackOff is the max backoff period for container restarts, exported for the e2e test
+	MaxContainerBackOff = 300 * time.Second
 )
 
 var (
@@ -52,7 +56,14 @@ func addDefaultingFuncs(scheme *kruntime.Scheme) error {
 	return RegisterDefaults(scheme)
 }
 
-func SetDefaults_KubeletConfiguration(obj *kubeletconfigv1beta1.KubeletConfiguration) {
+func SetDefaults_KubeletConfiguration(obj *kubeletconfigv1beta1.KubeletConfiguration, featureGate featuregate.FeatureGate) error {
+	// Make a local copy of the feature gates and combine it with the gates set by this configuration.
+	// This allows us to validate the config against the set of gates it will actually run against.
+	localFeatureGate := featureGate.DeepCopy()
+	if err := localFeatureGate.SetFromMap(obj.FeatureGates); err != nil {
+		return err
+	}
+
 	if obj.EnableServer == nil {
 		obj.EnableServer = ptr.To(true)
 	}
@@ -286,4 +297,11 @@ func SetDefaults_KubeletConfiguration(obj *kubeletconfigv1beta1.KubeletConfigura
 	if obj.PodLogsDir == "" {
 		obj.PodLogsDir = DefaultPodLogsDir
 	}
+
+	if localFeatureGate.Enabled(features.KubeletCrashLoopBackOffMax) {
+		if obj.CrashLoopBackOff.MaximumBackOffPeriod == nil {
+			obj.CrashLoopBackOff.MaximumBackOffPeriod = &metav1.Duration{Duration: MaxContainerBackOff}
+		}
+	}
+	return nil
 }

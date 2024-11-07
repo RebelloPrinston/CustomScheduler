@@ -203,6 +203,19 @@ func ValidateKubeletConfiguration(kc *kubeletconfig.KubeletConfiguration, featur
 		allErrors = append(allErrors, fmt.Errorf("invalid configuration: memorySwap.swapBehavior cannot be set when NodeSwap feature flag is disabled"))
 	}
 
+	if localFeatureGate.Enabled(features.KubeletCrashLoopBackOffMax) {
+		if kc.CrashLoopBackOff.MaximumBackOffPeriod == nil {
+			allErrors = append(allErrors, fmt.Errorf("invalid configuration: FeatureGate KubeletCrashLoopBackOffMax is enabled, CrashLoopBackOff.MaximumBackOffPeriod must be set"))
+		}
+		if kc.CrashLoopBackOff.MaximumBackOffPeriod != nil && utilvalidation.IsInRange(int(kc.CrashLoopBackOff.MaximumBackOffPeriod.Duration.Seconds()), 1, 300) != nil {
+			allErrors = append(allErrors, fmt.Errorf("invalid configuration: CrashLoopBackOff.MaximumBackOffPeriod (got: %v seconds) must be set between 1s and 300s", kc.CrashLoopBackOff.MaximumBackOffPeriod.Seconds()))
+		}
+	} else {
+		if kc.CrashLoopBackOff.MaximumBackOffPeriod != nil {
+			allErrors = append(allErrors, fmt.Errorf("invalid configuration: FeatureGate KubeletCrashLoopBackOffMax not enabled, CrashLoopBackOff.MaximumBackOffPeriod must not be set"))
+		}
+	}
+
 	// Check for mutually exclusive keys before the main validation loop
 	reservedKeys := map[string]bool{
 		kubetypes.SystemReservedEnforcementKey:             false,

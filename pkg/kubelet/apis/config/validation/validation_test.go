@@ -68,9 +68,10 @@ var (
 		ShutdownGracePeriodCriticalPods: metav1.Duration{Duration: 10 * time.Second},
 		MemoryThrottlingFactor:          ptr.To(0.9),
 		FeatureGates: map[string]bool{
-			"CustomCPUCFSQuotaPeriod": true,
-			"GracefulNodeShutdown":    true,
-			"MemoryQoS":               true,
+			"CustomCPUCFSQuotaPeriod":    true,
+			"GracefulNodeShutdown":       true,
+			"MemoryQoS":                  true,
+			"KubeletCrashLoopBackOffMax": true,
 		},
 		Logging: logsapi.LoggingConfiguration{
 			Format: "text",
@@ -78,6 +79,9 @@ var (
 		ContainerRuntimeEndpoint:    "unix:///run/containerd/containerd.sock",
 		ContainerLogMaxWorkers:      1,
 		ContainerLogMonitorInterval: metav1.Duration{Duration: 10 * time.Second},
+		CrashLoopBackOff: kubeletconfig.CrashLoopBackOffConfig{
+			MaximumBackOffPeriod: &metav1.Duration{Duration: 3 * time.Second},
+		},
 	}
 )
 
@@ -376,6 +380,40 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 			return conf
 		},
 		errMsg: "invalid configuration: memorySwap.swapBehavior cannot be set when NodeSwap feature flag is disabled",
+	}, {
+		name: "CrashLoopBackOff.MaximumBackOffPeriod too low",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true}
+			conf.CrashLoopBackOff = kubeletconfig.CrashLoopBackOffConfig{
+				MaximumBackOffPeriod: &metav1.Duration{Duration: 0 * time.Second},
+			}
+			return conf
+		},
+		errMsg: "invalid configuration: CrashLoopBackOff.MaximumBackOffPeriod (got: 0 seconds) must be set between 1s and 300s",
+	}, {
+		name: "CrashLoopBackOff.MaximumBackOffPeriod too high",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true}
+			conf.CrashLoopBackOff = kubeletconfig.CrashLoopBackOffConfig{
+				MaximumBackOffPeriod: &metav1.Duration{Duration: 301 * time.Second},
+			}
+			return conf
+		},
+		errMsg: "invalid configuration: CrashLoopBackOff.MaximumBackOffPeriod (got: 301 seconds) must be set between 1s and 300s",
+	}, {
+		name: "KubeletCrashLoopBackOffMax feature gate on, no crashLoopBackOff config, ok",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true, "CustomCPUCFSQuotaPeriod": true}
+			return conf
+		},
+	}, {
+		name: "KubeletCrashLoopBackOffMax feature gate on, but no crashLoopBackOff.MaximumBackoffPeriod config",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.FeatureGates = map[string]bool{"KubeletCrashLoopBackOffMax": true, "CustomCPUCFSQuotaPeriod": true}
+			conf.CrashLoopBackOff = kubeletconfig.CrashLoopBackOffConfig{}
+			return conf
+		},
+		errMsg: "invalid configuration: FeatureGate KubeletCrashLoopBackOffMax is enabled, CrashLoopBackOff.MaximumBackOffPeriod must be set",
 	}, {
 		name: "specify SystemReservedEnforcementKey without specifying SystemReservedCgroup",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
