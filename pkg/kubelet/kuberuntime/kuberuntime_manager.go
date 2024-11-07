@@ -1380,7 +1380,7 @@ type imageVolumePulls = map[string]imageVolumePullResult
 // If spec is nil, then err and msg should be set.
 // If err is nil, then spec should be set.
 type imageVolumePullResult struct {
-	spec runtimeapi.ImageSpec
+	spec *runtimeapi.ImageSpec
 	err  error
 	msg  string
 }
@@ -1409,7 +1409,7 @@ func (m *kubeGenericRuntimeManager) toKubeContainerImageVolumes(imageVolumePullR
 			continue
 		}
 
-		imageVolumes[v.Name] = &res.spec
+		imageVolumes[v.Name] = res.spec
 	}
 
 	if lastErr != nil {
@@ -1448,7 +1448,7 @@ func (m *kubeGenericRuntimeManager) getImageVolumes(ctx context.Context, pod *v1
 		}
 
 		klog.V(4).InfoS("Pulled image", "ref", ref, "pod", klog.KObj(pod))
-		res[volume.Name] = imageVolumePullResult{spec: runtimeapi.ImageSpec{
+		res[volume.Name] = imageVolumePullResult{spec: &runtimeapi.ImageSpec{
 			Image:              ref,
 			UserSpecifiedImage: volume.Image.Reference,
 			RuntimeHandler:     podRuntimeHandler,
