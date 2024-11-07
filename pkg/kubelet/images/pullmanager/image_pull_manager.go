@@ -241,14 +241,18 @@ func (f *PullManager) MustAttemptImagePull(image, imageRef string, podSecrets []
 		for _, cachedSecret := range cachedCreds.KubernetesSecrets {
 
 			if podSecret.CredentialHash == cachedSecret.CredentialHash {
-				// TODO: should we record the new secret in case it has different coordinates? If the secret rotates, we will pull unnecessarily otherwise
+				if err := f.writePulledRecord(image, imageRef, &kubeletconfiginternal.ImagePullCredentials{KubernetesSecrets: []kubeletconfiginternal.ImagePullSecret{podSecret}}); err != nil {
+					klog.ErrorS(err, "failed to write an image pulled record", "image", image, "imageRef", imageRef)
+				}
 				return false
 			}
 
 			if podSecret.UID == cachedSecret.UID &&
 				podSecret.Namespace == cachedSecret.Namespace &&
 				podSecret.Name == cachedSecret.Name {
-				// TODO: should we record the new creds in this case so that we don't pull if these are present in a different secret?
+				if err := f.writePulledRecord(image, imageRef, &kubeletconfiginternal.ImagePullCredentials{KubernetesSecrets: []kubeletconfiginternal.ImagePullSecret{podSecret}}); err != nil {
+					klog.ErrorS(err, "failed to write an image pulled record", "image", image, "imageRef", imageRef)
+				}
 				return false
 			}
 		}
