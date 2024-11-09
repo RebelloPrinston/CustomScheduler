@@ -141,18 +141,12 @@ func (s *staticPortRange) nextFreePort() (int, bool) {
 	return -1, false
 }
 
-// release the port passed as an argument and returns true. If
-// an invalid port or unreserved port was provided, it returns false
-func (s *staticPortRange) release(port int) bool {
+// release the port passed as an argument
+func (s *staticPortRange) release(port int) {
 	s.Lock()
 	defer s.Unlock()
 	port -= s.baseport
-	// port is out of range, it can not be released
-	if port < 0 || port > s.length || !s.reservedPorts.Has(port) {
-		return false
-	}
 	s.reservedPorts.Delete(port)
-	return true
 }
 
 // ReserveStaticNodePort reserves the port provided as input.
@@ -167,10 +161,9 @@ func GetUnusedStaticNodePort() (int, bool) {
 	return staticPortAllocator.nextFreePort()
 }
 
-// ReleaseStaticNodePort releases a previously reserved static port and returns true
-// If the port was not previously reserved it returns false
-func ReleaseStaticNodePort(port int) bool {
-	return staticPortAllocator.release(port)
+// ReleaseStaticNodePort releases the specified port
+func ReleaseStaticNodePort(port int) {
+	staticPortAllocator.release(port)
 }
 
 // newServiceTemplate returns the default v1.Service template for this j, but
