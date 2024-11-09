@@ -3964,11 +3964,10 @@ var _ = common.SIGDescribe("Services", func() {
 			port, ok := e2eservice.GetUnusedStaticNodePort()
 			if !ok {
 				framework.Logf("Static node port allocator was not able to reserve nodeport so we use the one assigned by the apiserver")
-			} else {
-				svc.Spec.HealthCheckNodePort = int32(port)
 			}
 			svc, err = jig.CreateLoadBalancerServiceWaitForClusterIPOnly(func(svc *v1.Service) {
 				svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyLocal
+				svc.Spec.HealthCheckNodePort = int32(port)
 			})
 			if err == nil {
 				staticHealthCheckPort := svc.Spec.HealthCheckNodePort
@@ -3978,7 +3977,7 @@ var _ = common.SIGDescribe("Services", func() {
 				}
 				break
 				// We do not retry if port allocator was not able to reserve nodeport.
-				//This indicates a problem in code and we have a log message to debug it.
+				// This indicates a problem in code and we have a log message to debug it.
 			}
 			if apierrors.IsConflict(err) {
 				framework.Logf("node port %d is already allocated to other service, retrying ... : %v", port, err)
