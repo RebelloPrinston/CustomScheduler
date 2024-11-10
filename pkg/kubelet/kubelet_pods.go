@@ -1006,7 +1006,7 @@ func (kl *Kubelet) makePodDataDirs(pod *v1.Pod) error {
 
 // getPullSecretsForPod inspects the Pod and retrieves the referenced pull
 // secrets.
-func (kl *Kubelet) getPullSecretsForPod(pod *v1.Pod) []v1.Secret {
+func (kl *Kubelet) getPullSecretsForPod(pod *v1.Pod) ([]v1.Secret, []string) {
 	pullSecrets := []v1.Secret{}
 	failedPullSecrets := []string{}
 
@@ -1026,11 +1026,7 @@ func (kl *Kubelet) getPullSecretsForPod(pod *v1.Pod) []v1.Secret {
 		pullSecrets = append(pullSecrets, *secret)
 	}
 
-	if len(failedPullSecrets) > 0 {
-		kl.recorder.Eventf(pod, v1.EventTypeWarning, "FailedToRetrieveImagePullSecret", "Unable to retrieve some image pull secrets (%s); attempting to pull the image may not succeed.", strings.Join(failedPullSecrets, ", "))
-	}
-
-	return pullSecrets
+	return pullSecrets, failedPullSecrets
 }
 
 // PodCouldHaveRunningContainers returns true if the pod with the given UID could still have running
