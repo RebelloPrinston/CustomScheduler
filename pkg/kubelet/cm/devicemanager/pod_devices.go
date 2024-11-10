@@ -240,6 +240,7 @@ func (pdev *podDevices) fromCheckpointData(data []checkpoint.PodDevicesEntry) {
 			continue
 		}
 		pdev.insert(entry.PodUID, entry.ContainerName, entry.ResourceName, entry.DeviceIDs, allocResp)
+		klog.InfoS(">>> fromCheckpointData: inserted device", "podUID", entry.PodUID, "containerName", entry.ContainerName, "resourceName", entry.ResourceName, "deviceIDs", entry.DeviceIDs, "allocResp", allocResp, "pdev.devs", pdev.devs)
 	}
 }
 
@@ -378,10 +379,14 @@ func (pdev *podDevices) getContainerDevices(podUID, contName string) ResourceDev
 	pdev.RLock()
 	defer pdev.RUnlock()
 
+	klog.InfoS(">>> getContainerDevices", "podUID", podUID, "containerName", contName, "pdev.devs", pdev.devs)
+
 	if _, podExists := pdev.devs[podUID]; !podExists {
+		klog.InfoS(">>> getContainerDevices: pod doesn't exist", "podUID", podUID)
 		return nil
 	}
 	if _, contExists := pdev.devs[podUID][contName]; !contExists {
+		klog.InfoS(">>> getContainerDevices: container doesn't exist", "podUID", podUID, "containerName", contName)
 		return nil
 	}
 	resDev := NewResourceDeviceInstances()
@@ -411,6 +416,7 @@ func (pdev *podDevices) getContainerDevices(podUID, contName string) ResourceDev
 		}
 		resDev[resource] = devicePluginMap
 	}
+	klog.InfoS(">>> getContainerDevices", "podUID", podUID, "containerName", contName, "resDev", resDev)
 	return resDev
 }
 

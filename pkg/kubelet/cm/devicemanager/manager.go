@@ -268,6 +268,7 @@ func (m *ManagerImpl) PluginListAndWatchReceiver(resourceName string, resp *plug
 }
 
 func (m *ManagerImpl) genericDeviceUpdateCallback(resourceName string, devices []pluginapi.Device) {
+	klog.InfoS(">>> genericDeviceUpdateCallback", "resourceName", resourceName, "devices", devices)
 	healthyCount := 0
 	m.mutex.Lock()
 	m.healthyDevices[resourceName] = sets.New[string]()
@@ -275,6 +276,7 @@ func (m *ManagerImpl) genericDeviceUpdateCallback(resourceName string, devices [
 	oldDevices := m.allDevices[resourceName]
 	podsToUpdate := sets.New[string]()
 	m.allDevices[resourceName] = make(map[string]pluginapi.Device)
+	klog.InfoS(">>> genericDeviceUpdateCallback", "resourceName", resourceName, "oldDevices", oldDevices)
 	for _, dev := range devices {
 
 		if utilfeature.DefaultFeatureGate.Enabled(features.ResourceHealthStatus) {
@@ -294,6 +296,7 @@ func (m *ManagerImpl) genericDeviceUpdateCallback(resourceName string, devices [
 				// but still be assigned to a Pod. In this case, we need to send an update to the channel
 				updatePodUIDFn(dev.ID)
 			}
+			klog.InfoS(">>> genericDeviceUpdateCallback: ResourceHealthStatus is enabled", "resourceName", resourceName, "deviceID", dev.ID, "health", dev.Health)
 		}
 
 		m.allDevices[resourceName][dev.ID] = dev
@@ -303,6 +306,7 @@ func (m *ManagerImpl) genericDeviceUpdateCallback(resourceName string, devices [
 		} else {
 			m.unhealthyDevices[resourceName].Insert(dev.ID)
 		}
+		klog.InfoS(">>> genericDeviceUpdateCallback", "resourceName", resourceName, "deviceID", dev.ID, "health", dev.Health, "podsToUpdate", podsToUpdate)
 	}
 	m.mutex.Unlock()
 
@@ -506,6 +510,7 @@ func (m *ManagerImpl) writeCheckpoint() error {
 		klog.InfoS("Failed to write checkpoint file", "err", err)
 		return err2
 	}
+	klog.InfoS(">>> writeCheckpoint", "data", data)
 	return nil
 }
 
@@ -527,6 +532,7 @@ func (m *ManagerImpl) readCheckpoint() error {
 	podDevices, registeredDevs := cp.GetData()
 	m.podDevices.fromCheckpointData(podDevices)
 	m.allocatedDevices = m.podDevices.devices()
+	klog.InfoS(">>> readCheckpoint", "podDevices", podDevices, "registeredDevs", registeredDevs, "allocatedDevices", m.allocatedDevices)
 	for resource := range registeredDevs {
 		// During start up, creates empty healthyDevices list so that the resource capacity
 		// will stay zero till the corresponding device plugin re-registers.
@@ -534,6 +540,7 @@ func (m *ManagerImpl) readCheckpoint() error {
 		m.unhealthyDevices[resource] = sets.New[string]()
 		m.endpoints[resource] = endpointInfo{e: newStoppedEndpointImpl(resource), opts: nil}
 	}
+	klog.InfoS(">>> readCheckpoint", "healthyDevices", m.healthyDevices, "unhealthyDevices", m.unhealthyDevices, "endpoints", m.endpoints)
 	return nil
 }
 
@@ -603,6 +610,7 @@ func (m *ManagerImpl) devicesToAllocate(podUID, contName, resource string, requi
 	// We dealt with scenario 2. If we got this far it's either scenario 3 (node reboot) or scenario 1 (steady state, normal flow).
 	klog.V(3).InfoS("Need devices to allocate for pod", "deviceNumber", needed, "resourceName", resource, "podUID", podUID, "containerName", contName)
 	healthyDevices, hasRegistered := m.healthyDevices[resource]
+	klog.InfoS(">>> devicesToAllocate", "healthyDevices", healthyDevices, "hasRegistered", hasRegistered)
 
 	// The following checks are expected to fail only happen on scenario 3 (node reboot).
 	// The kubelet is reinitializing and got a container from sources. But there's no ordering, so an app container may attempt allocation _before_ the device plugin was created,
