@@ -363,9 +363,14 @@ type QueuedPodInfo struct {
 	*PodInfo
 	// The time pod added to the scheduling queue.
 	Timestamp time.Time
-	// Number of schedule attempts before successfully scheduled.
-	// It's used to record the # attempts metric and calculate the backoff time this Pod is obliged to get before retrying.
+	// Number of all schedule attempts before successfully scheduled.
+	// It's used to record the # attempts metric.
 	Attempts int
+	// Number of the scheduling attempts that this Pod gets unschedulable.
+	// Basically it equals Attempts, but when the Pod fails with the Error status (e.g., the network error),
+	// this count won't be incremented.
+	// It's used to calculate the backoff time this Pod is obliged to get before retrying.
+	UnschedulableCount int
 	// The time when the pod is added to the queue for the first time. The pod may be added
 	// back to the queue multiple times before it's successfully scheduled.
 	// It shouldn't be updated once initialized. It's used to record the e2e scheduling
@@ -390,6 +395,7 @@ func (pqi *QueuedPodInfo) DeepCopy() *QueuedPodInfo {
 		PodInfo:                 pqi.PodInfo.DeepCopy(),
 		Timestamp:               pqi.Timestamp,
 		Attempts:                pqi.Attempts,
+		UnschedulableCount:      pqi.UnschedulableCount,
 		InitialAttemptTimestamp: pqi.InitialAttemptTimestamp,
 		UnschedulablePlugins:    pqi.UnschedulablePlugins.Clone(),
 		PendingPlugins:          pqi.PendingPlugins.Clone(),

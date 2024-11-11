@@ -736,9 +736,12 @@ func (p *PriorityQueue) addUnschedulableWithoutQueueingHint(logger klog.Logger, 
 		// - No unschedulable plugins are associated with this Pod,
 		//   meaning something unusual (a temporal failure on kube-apiserver, etc) happened and this Pod gets moved back to the queue.
 		//   In this case, we should retry scheduling it because this Pod may not be retried until the next flush.
-		p.podBackoffQ.AddOrUpdate(pInfo)
-		logger.V(5).Info("Pod moved to an internal scheduling queue", "pod", klog.KObj(pod), "event", framework.ScheduleAttemptFailure, "queue", backoffQ)
-		metrics.SchedulerQueueIncomingPods.WithLabelValues("backoff", framework.ScheduleAttemptFailure).Inc()
+		queue := p.requeuePodViaQueueingHint(logger, pInfo, queueAfterBackoff, framework.ScheduleAttemptFailure)
+		logger.V(5).Info("Pod is pushed to an internal scheduling queue", "pod", klog.KObj(pod), "event", framework.ScheduleAttemptFailure, "queue", queue)
+		if queue == activeQ {
+			// When the Pod is moved to activeQ, need to let p.cond know so that the Pod will be pop()ed out.
+			p.activeQ.broadcast()
+		}
 	} else {
 		p.unschedulablePods.addOrUpdate(pInfo)
 		logger.V(5).Info("Pod moved to an internal scheduling queue", "pod", klog.KObj(pod), "event", framework.ScheduleAttemptFailure, "queue", unschedulablePods)
@@ -769,6 +772,11 @@ func (p *PriorityQueue) AddUnschedulableIfNotPresent(logger klog.Logger, pInfo *
 	}
 	if p.podBackoffQ.Has(pInfo) {
 		return fmt.Errorf("Pod %v is already present in the backoff queue", klog.KObj(pod))
+	}
+
+	if pInfo.UnschedulablePlugins.Union(pInfo.PendingPlugins).Len() != 0 {
+		// This Pod is rejected by some plugins, not coming back due to unexpected errors (e.g., a network issue)
+		pInfo.UnschedulableCount++
 	}
 
 	if !p.isSchedulingQueueHintEnabled {
@@ -1306,14 +1314,14 @@ func (p *PriorityQueue) getBackoffTime(podInfo *framework.QueuedPodInfo) time.Ti
 // calculateBackoffDuration is a helper function for calculating the backoffDuration
 // based on the number of attempts the pod has made.
 func (p *PriorityQueue) calculateBackoffDuration(podInfo *framework.QueuedPodInfo) time.Duration {
-	if podInfo.Attempts == 0 {
+	if podInfo.UnschedulableCount == 0 {
 		// When the Pod hasn't experienced any scheduling attempts,
 		// they aren't obliged to get a backoff penalty at all.
 		return 0
 	}
 
 	duration := p.podInitialBackoffDuration
-	for i := 1; i < podInfo.Attempts; i++ {
+	for i := 1; i < podInfo.UnschedulableCount; i++ {
 		// Use subtraction instead of addition or multiplication to avoid overflow.
 		if duration > p.podMaxBackoffDuration-duration {
 			return p.podMaxBackoffDuration
