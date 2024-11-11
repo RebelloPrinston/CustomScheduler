@@ -3958,7 +3958,6 @@ var _ = common.SIGDescribe("Services", func() {
 
 		ginkgo.By("creating the service")
 		var svc *v1.Service
-		errAllocated := errors.New("provided port is already allocated")
 		numberOfRetries := 5
 		for i := 0; i < numberOfRetries; i++ {
 			port, ok := e2eservice.GetUnusedStaticNodePort()
@@ -4115,15 +4114,13 @@ var _ = common.SIGDescribe("Services", func() {
 		checkOneNodePort(thirdNodeIP, true, v1.ServiceExternalTrafficPolicyCluster, deadline)
 
 		ginkgo.By("changing ExternalTrafficPolicy back to Local")
-
 		_, err = jig.UpdateService(ctx, func(svc *v1.Service) {
 			svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyLocal
 			// Request the same healthCheckNodePort as before, to test the user-requested allocation path
 			svc.Spec.HealthCheckNodePort = oldHealthCheckNodePort
-
+		})
 		framework.ExpectNoError(err, "updating ExternalTrafficPolicy and HealthCheckNodePort")
 		deadline = time.Now().Add(e2eservice.KubeProxyEndpointLagTimeout)
-		
 		ginkgo.By("ensuring that all NodePorts and HealthCheckNodePorts show the correct behavior again after changing ExternalTrafficPolicy back to Local")
 		checkOneHealthCheck(endpointNodeIP, true, "200 OK", deadline)
 		checkOneHealthCheck(hostExecPodNodeIP, true, "503 Service Unavailable", deadline)
