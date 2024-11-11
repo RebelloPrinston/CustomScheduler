@@ -182,7 +182,7 @@ type PriorityQueue struct {
 	moveRequestCycle int64
 
 	// preEnqueuePluginMap is keyed with profile name, valued with registered preEnqueue plugins.
-	preEnqueuePluginMap map[string][]framework.PreEnqueuePlugin
+	preEnqueuePluginMap map[string]map[string]framework.PreEnqueuePlugin
 	// queueingHintMap is keyed with profile name, valued with registered queueing hint functions.
 	queueingHintMap QueueingHintMapPerProfile
 	// pluginToEventsMap shows which plugin is interested in which events.
@@ -221,7 +221,7 @@ type priorityQueueOptions struct {
 	podLister                         listersv1.PodLister
 	metricsRecorder                   metrics.MetricAsyncRecorder
 	pluginMetricsSamplePercent        int
-	preEnqueuePluginMap               map[string][]framework.PreEnqueuePlugin
+	preEnqueuePluginMap               map[string]map[string]framework.PreEnqueuePlugin
 	queueingHintMap                   QueueingHintMapPerProfile
 }
 
@@ -277,7 +277,7 @@ func WithQueueingHintMapPerProfile(m QueueingHintMapPerProfile) Option {
 }
 
 // WithPreEnqueuePluginMap sets preEnqueuePluginMap for PriorityQueue.
-func WithPreEnqueuePluginMap(m map[string][]framework.PreEnqueuePlugin) Option {
+func WithPreEnqueuePluginMap(m map[string]map[string]framework.PreEnqueuePlugin) Option {
 	return func(o *priorityQueueOptions) {
 		o.preEnqueuePluginMap = m
 	}
@@ -532,7 +532,6 @@ func queueingHintToLabel(hint framework.QueueingHint, err error) string {
 // Note: we need to associate the failed plugin to `pInfo`, so that the pod can be moved back
 // to activeQ by related cluster event.
 func (p *PriorityQueue) runPreEnqueuePlugins(ctx context.Context, pInfo *framework.QueuedPodInfo) {
-	logger := klog.FromContext(ctx)
 	var s *framework.Status
 	pod := pInfo.Pod
 	startTime := p.clock.Now()
@@ -541,33 +540,51 @@ func (p *PriorityQueue) runPreEnqueuePlugins(ctx context.Context, pInfo *framewo
 	}()
 
 	shouldRecordMetric := rand.Intn(100) < p.pluginMetricsSamplePercent
+	logger := klog.FromContext(ctx)
+	if pInfo.GatingPlugin != "" {
+		// Run the gating plugin first
+		s := p.runPreEnqueuePlugin(ctx, logger, p.preEnqueuePluginMap[pod.Spec.SchedulerName][pInfo.GatingPlugin], pInfo, shouldRecordMetric)
+		if !s.IsSuccess() {
+			// No need to iterate other plugins
+			return
+		}
+	}
+
 	for _, pl := range p.preEnqueuePluginMap[pod.Spec.SchedulerName] {
-		s = p.runPreEnqueuePlugin(ctx, pl, pod, shouldRecordMetric)
-		if s.IsSuccess() {
+		if pInfo.GatingPlugin != "" && pl.Name() == pInfo.GatingPlugin {
+			// should be run already above.
 			continue
 		}
-		pInfo.UnschedulablePlugins.Insert(pl.Name())
-		pInfo.GatingPlugin = pl.Name()
-		metrics.UnschedulableReason(pl.Name(), pod.Spec.SchedulerName).Inc()
-		if s.Code() == framework.Error {
-			logger.Error(s.AsError(), "Unexpected error running PreEnqueue plugin", "pod", klog.KObj(pod), "plugin", pl.Name())
-		} else {
-			logger.V(4).Info("Status after running PreEnqueue plugin", "pod", klog.KObj(pod), "plugin", pl.Name(), "status", s)
+		s := p.runPreEnqueuePlugin(ctx, logger, pl, pInfo, shouldRecordMetric)
+		if !s.IsSuccess() {
+			// No need to iterate other plugins
+			return
 		}
-		// No need to iterate other plugins
-		return
 	}
 	// all plugins passed
 	pInfo.GatingPlugin = ""
 }
 
-func (p *PriorityQueue) runPreEnqueuePlugin(ctx context.Context, pl framework.PreEnqueuePlugin, pod *v1.Pod, shouldRecordMetric bool) *framework.Status {
-	if !shouldRecordMetric {
-		return pl.PreEnqueue(ctx, pod)
-	}
+// runPreEnqueuePlugin runs the PreEnqueue plugin and update pInfo's fields accordingly if needed.
+func (p *PriorityQueue) runPreEnqueuePlugin(ctx context.Context, logger klog.Logger, pl framework.PreEnqueuePlugin, pInfo *framework.QueuedPodInfo, shouldRecordMetric bool) *framework.Status {
+	pod := pInfo.Pod
 	startTime := p.clock.Now()
 	s := pl.PreEnqueue(ctx, pod)
-	p.metricsRecorder.ObservePluginDurationAsync(preEnqueue, pl.Name(), s.Code().String(), p.clock.Since(startTime).Seconds())
+	if shouldRecordMetric {
+		p.metricsRecorder.ObservePluginDurationAsync(preEnqueue, pl.Name(), s.Code().String(), p.clock.Since(startTime).Seconds())
+	}
+	if s.IsSuccess() {
+		return s
+	}
+	pInfo.UnschedulablePlugins.Insert(pl.Name())
+	metrics.UnschedulableReason(pl.Name(), pod.Spec.SchedulerName).Inc()
+	pInfo.GatingPlugin = pl.Name()
+	if s.Code() == framework.Error {
+		logger.Error(s.AsError(), "Unexpected error running PreEnqueue plugin", "pod", klog.KObj(pod), "plugin", pl.Name())
+	} else {
+		logger.V(4).Info("Status after running PreEnqueue plugin", "pod", klog.KObj(pod), "plugin", pl.Name(), "status", s)
+	}
+
 	return s
 }
 
