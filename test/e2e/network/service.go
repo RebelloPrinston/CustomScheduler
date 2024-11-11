@@ -4116,25 +4116,14 @@ var _ = common.SIGDescribe("Services", func() {
 
 		ginkgo.By("changing ExternalTrafficPolicy back to Local")
 
-		// retry a few times in case some other service has taken up the static HCNP
-		// despite being reserved and might release soon
-		err = retry.OnError(retry.DefaultRetry, func(err error) bool {
-			if err != nil && strings.Contains(err.Error(), errAllocated.Error()) {
-				return true
-			}
-			return false
-		}, func() error {
-			_, err = jig.UpdateService(ctx, func(svc *v1.Service) {
-				svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyLocal
-				// Request the same healthCheckNodePort as before, to test the user-requested allocation path
-				svc.Spec.HealthCheckNodePort = oldHealthCheckNodePort
-			})
-			return err
-		})
+		_, err = jig.UpdateService(ctx, func(svc *v1.Service) {
+			svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyLocal
+			// Request the same healthCheckNodePort as before, to test the user-requested allocation path
+			svc.Spec.HealthCheckNodePort = oldHealthCheckNodePort
 
 		framework.ExpectNoError(err, "updating ExternalTrafficPolicy and HealthCheckNodePort")
 		deadline = time.Now().Add(e2eservice.KubeProxyEndpointLagTimeout)
-
+		
 		ginkgo.By("ensuring that all NodePorts and HealthCheckNodePorts show the correct behavior again after changing ExternalTrafficPolicy back to Local")
 		checkOneHealthCheck(endpointNodeIP, true, "200 OK", deadline)
 		checkOneHealthCheck(hostExecPodNodeIP, true, "503 Service Unavailable", deadline)
