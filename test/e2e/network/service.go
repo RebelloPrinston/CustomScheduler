@@ -4121,6 +4121,7 @@ var _ = common.SIGDescribe("Services", func() {
 		})
 		framework.ExpectNoError(err, "updating ExternalTrafficPolicy and HealthCheckNodePort")
 		deadline = time.Now().Add(e2eservice.KubeProxyEndpointLagTimeout)
+
 		ginkgo.By("ensuring that all NodePorts and HealthCheckNodePorts show the correct behavior again after changing ExternalTrafficPolicy back to Local")
 		checkOneHealthCheck(endpointNodeIP, true, "200 OK", deadline)
 		checkOneHealthCheck(hostExecPodNodeIP, true, "503 Service Unavailable", deadline)
