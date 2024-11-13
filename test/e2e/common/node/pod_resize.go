@@ -972,6 +972,7 @@ func doPodResizeTests(f *framework.Framework) {
 			e2epod.InitDefaultResizePolicy(tc.containers)
 			e2epod.InitDefaultResizePolicy(tc.expected)
 			testPod = e2epod.MakePodWithResizableContainers(f.Namespace.Name, "", tStamp, tc.containers)
+			e2epod.ConfigureHostPathForPodCgroup(testPod)
 			testPod.GenerateName = "resize-test-"
 
 			if tc.addExtendedResource {
@@ -1158,6 +1159,7 @@ func doPodResizeErrorTests(f *framework.Framework) {
 			e2epod.InitDefaultResizePolicy(tc.containers)
 			e2epod.InitDefaultResizePolicy(tc.expected)
 			testPod = e2epod.MakePodWithResizableContainers(f.Namespace.Name, "testpod", tStamp, tc.containers)
+			e2epod.ConfigureHostPathForPodCgroup(testPod)
 
 			ginkgo.By("creating pod")
 			newPod := podClient.CreateSync(ctx, testPod)
