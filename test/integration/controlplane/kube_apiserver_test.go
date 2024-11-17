@@ -38,10 +38,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/kubernetes"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
+	"k8s.io/component-base/zpages/features"
+	"k8s.io/component-base/zpages/flagz"
 	"k8s.io/kube-aggregator/pkg/apis/apiregistration"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 	kubeapiservertesting "k8s.io/kubernetes/cmd/kube-apiserver/app/testing"
+	"k8s.io/kubernetes/pkg/controlplane"
 	"k8s.io/kubernetes/test/integration/etcd"
 	"k8s.io/kubernetes/test/integration/framework"
 )
@@ -124,6 +129,33 @@ func TestLivezAndReadyz(t *testing.T) {
 	}
 	if statusOK, err := endpointReturnsStatusOK(client, "/readyz"); err != nil || !statusOK {
 		t.Fatalf("readyz should be healthy, got %v and error %v", statusOK, err)
+	}
+}
+
+func TestFlagz(t *testing.T) {
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ComponentFlagz, true)
+	server := kubeapiservertesting.StartTestServerOrDie(t, nil, framework.DefaultTestServerFlags(), framework.SharedEtcd())
+	defer server.TearDownFn()
+
+	client, err := kubernetes.NewForConfig(server.ClientConfig)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	res := client.CoreV1().RESTClient().Get().RequestURI("/flagz").Do(context.TODO())
+	var status int
+	res.StatusCode(&status)
+	if status != http.StatusOK {
+		t.Fatalf("flagz/ should be healthy, got %v", status)
+	}
+
+	expectedHeader := fmt.Sprintf(flagz.FlagzHeaderFmt, controlplane.KubeAPIServer)
+	raw, err := res.Raw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(raw, []byte(expectedHeader)) {
+		t.Fatalf("Header mismatch!\nExpected:\n%s\n\nGot:\n%s", expectedHeader, string(raw))
 	}
 }
 

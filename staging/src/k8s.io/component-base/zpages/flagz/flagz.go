@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	flagzHeaderFmt = `
+	FlagzHeaderFmt = `
 %s flags
 Warning: This endpoint is not meant to be machine parseable, has no formatting compatibility guarantees and is for debugging purposes only.
 
@@ -70,7 +70,7 @@ func (reg *registry) handleFlags(componentName string, flagReader Reader) http.H
 		}
 
 		reg.once.Do(func() {
-			fmt.Fprintf(&reg.response, flagzHeaderFmt, componentName)
+			fmt.Fprintf(&reg.response, FlagzHeaderFmt, componentName)
 			if flagReader == nil {
 				klog.Error("received nil flagReader")
 				return

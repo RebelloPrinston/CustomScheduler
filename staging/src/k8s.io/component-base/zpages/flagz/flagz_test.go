@@ -29,9 +29,7 @@ import (
 	cliflag "k8s.io/component-base/cli/flag"
 )
 
-const wantTmpl = `%s flags
-Warning: This endpoint is not meant to be machine parseable, has no formatting compatibility guarantees and is for debugging purposes only.
-`
+const wantTmpl = FlagzHeaderFmt
 
 func TestFlagz(t *testing.T) {
 	componentName := "test-server"
