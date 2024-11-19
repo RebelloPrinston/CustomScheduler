@@ -110,6 +110,8 @@ func init() {
 
 func setQueuedPodInfoGated(queuedPodInfo *framework.QueuedPodInfo, gatingPlugin string) *framework.QueuedPodInfo {
 	queuedPodInfo.GatingPlugin = gatingPlugin
+	// GatingPlugin should also be registered in UnschedulablePlugins.
+	queuedPodInfo.UnschedulablePlugins = sets.New(gatingPlugin)
 	return queuedPodInfo
 }
 
@@ -1643,7 +1645,7 @@ func BenchmarkMoveAllToActiveOrBackoffQueue(b *testing.B) {
 
 func TestPriorityQueue_MoveAllToActiveOrBackoffQueueWithQueueingHint(t *testing.T) {
 	now := time.Now()
-	p := st.MakePod().Name("pod1").Namespace("ns1").UID("1").Obj()
+	p := st.MakePod().Name("pod1").Namespace("ns1").UID("1").Label("foo", "bar").Obj()
 	tests := []struct {
 		name    string
 		podInfo *framework.QueuedPodInfo
@@ -1679,8 +1681,8 @@ func TestPriorityQueue_MoveAllToActiveOrBackoffQueueWithQueueingHint(t *testing.
 			expectedQ: unschedulablePods,
 		},
 		{
-			name:    "QueueHintFunction is not called when Pod is gated by the plugin that isn't interested in the NodeAdd event",
-			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), UnschedulablePlugins: sets.New(names.SchedulingGates, "foo")}, names.SchedulingGates),
+			name:    "QueueHintFunction is not called when Pod is gated by the plugin that isn't interested in the event",
+			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p)}, names.SchedulingGates),
 			// The hintFn should not be called as the pod is gated by SchedulingGates plugin,
 			// the scheduling gate isn't interested in the node add event,
 			// and the queue should keep this Pod in the unschedQ without calling the hintFn.
@@ -1690,8 +1692,8 @@ func TestPriorityQueue_MoveAllToActiveOrBackoffQueueWithQueueingHint(t *testing.
 			expectedQ: unschedulablePods,
 		},
 		{
-			name:    "QueueHintFunction is not called when Pod is gated by the plugin that is interested in the NodeAdd event",
-			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), UnschedulablePlugins: sets.New(names.SchedulingGates, "foo")}, ""),
+			name:    "QueueHintFunction is called when Pod is gated by the plugin that is interested in the event",
+			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p)}, "foo"),
 			// In this case, the hintFn should be called as the pod is gated by foo plugin that is interested in the NodeAdd event.
 			hint: queueHintReturnQueue,
 			// and, as a result, this pod should be queued to activeQ.
@@ -1699,7 +1701,7 @@ func TestPriorityQueue_MoveAllToActiveOrBackoffQueueWithQueueingHint(t *testing.
 		},
 		{
 			name:      "Pod that experienced a scheduling failure before should be queued to backoffQ after un-gated",
-			podInfo:   setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), Attempts: 1, UnschedulablePlugins: sets.New("foo"), GatingPlugin: "foo"}, "foo"),
+			podInfo:   setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), Attempts: 1}, "foo"),
 			hint:      queueHintReturnQueue,
 			expectedQ: backoffQ,
 		},
@@ -1722,7 +1724,12 @@ func TestPriorityQueue_MoveAllToActiveOrBackoffQueueWithQueueingHint(t *testing.
 				},
 			}
 			cl := testingclock.NewFakeClock(now)
-			q := NewTestQueue(ctx, newDefaultQueueSort(), WithQueueingHintMapPerProfile(m), WithClock(cl))
+			plugin, _ := schedulinggates.New(ctx, nil, nil, plfeature.Features{})
+			preEnqM := map[string]map[string]framework.PreEnqueuePlugin{"": {
+				names.SchedulingGates: plugin.(framework.PreEnqueuePlugin),
+				"foo":                 &preEnqueuePlugin{allowlists: []string{"foo"}},
+			}}
+			q := NewTestQueue(ctx, newDefaultQueueSort(), WithQueueingHintMapPerProfile(m), WithClock(cl), WithPreEnqueuePluginMap(preEnqM))
 			q.Add(logger, test.podInfo.Pod)
 			if p, err := q.Pop(logger); err != nil || p.Pod != test.podInfo.Pod {
 				t.Errorf("Expected: %v after Pop, but got: %v", test.podInfo.Pod.Name, p.Pod.Name)
