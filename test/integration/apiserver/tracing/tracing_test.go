@@ -299,7 +299,7 @@ endpoint: %s`, listener.Addr().String())), os.FileMode(0755)); err != nil {
 	// Match any span that has the tests' Trace ID
 	fakeServer.resetExpectations([]*spanExpectation{{}}, testTraceID)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", testServer.ClientConfig.Host+"/healthz", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, testServer.ClientConfig.Host+"/healthz", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,11 @@ func TestAPIServerTracing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tracingConfigFile.Name())
+	defer func() {
+		if err = os.Remove(tracingConfigFile.Name()); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	if err := os.WriteFile(tracingConfigFile.Name(), []byte(fmt.Sprintf(`
 apiVersion: apiserver.config.k8s.io/v1beta1
@@ -349,7 +353,11 @@ endpoint: %s`, listener.Addr().String())), os.FileMode(0755)); err != nil {
 	fakeServer.resetExpectations([]*spanExpectation{}, trace.TraceID{})
 	traceservice.RegisterTraceServiceServer(srv, fakeServer)
 
-	go srv.Serve(listener)
+	go func() {
+		if err = srv.Serve(listener); err != nil {
+			t.Error(err)
+		}
+	}()
 	defer srv.Stop()
 
 	// Start the API Server with our tracing configuration

@@ -25,7 +25,6 @@ import (
 	"k8s.io/apiserver/pkg/endpoints/request"
 
 	"k8s.io/apiserver/pkg/authentication/user"
-	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	tracing "k8s.io/component-base/tracing"
 )
 
@@ -48,7 +47,7 @@ func WithTracing(handler http.Handler, tp trace.TracerProvider) http.Handler {
 		// Adjust otelhttp tracing start time to match the start time used
 		// for Prometheus metrics.
 		if startTime, ok := request.ReceivedTimestampFrom(r.Context()); ok {
-			r.WithContext(otelhttp.ContextWithStartTime(r.Context(), startTime))
+			r = r.WithContext(otelhttp.ContextWithStartTime(r.Context(), startTime))
 		}
 		// Add the http.target attribute to the otelhttp span
 		// Workaround for https://github.com/open-telemetry/opentelemetry-go-contrib/issues/3743
@@ -82,7 +81,7 @@ func getSpanNameFromRequestInfo(info *request.RequestInfo, r *http.Request) stri
 }
 
 func notSystemPrivilegedGroup(req *http.Request) bool {
-	if u, ok := genericapirequest.UserFrom(req.Context()); ok {
+	if u, ok := request.UserFrom(req.Context()); ok {
 		for _, group := range u.GetGroups() {
 			if group == user.SystemPrivilegedGroup || group == user.MonitoringGroup {
 				return false
