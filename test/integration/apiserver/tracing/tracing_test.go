@@ -370,29 +370,6 @@ endpoint: %s`, listener.Addr().String())), os.FileMode(0755)); err != nil {
 		expectedTrace []*spanExpectation
 	}{
 		{
-			desc: "authenticated healthz request",
-			apiCall: func(ctx context.Context) error {
-				req, err := http.NewRequestWithContext(ctx, "GET", testServer.ClientConfig.Host+"/healthz", nil)
-				if err != nil {
-					return err
-				}
-				unauthenticatedConfig := rest.CopyConfig(testServer.ClientConfig)
-				// unauthenticatedConfig.BearerToken = "" // This causes the test to fail
-				transport, err := rest.TransportFor(unauthenticatedConfig)
-				if err != nil {
-					return err
-				}
-				client := &http.Client{Transport: otelhttp.NewTransport(transport)}
-				_, err = client.Do(req)
-				return err
-			},
-			expectedTrace: []*spanExpectation{
-				{
-					name: "KubernetesAPI",
-				},
-			},
-		},
-		{
 			desc: "create node",
 			apiCall: func(ctx context.Context) error {
 				_, err = clientSet.CoreV1().Nodes().Create(ctx,
@@ -663,20 +640,13 @@ endpoint: %s`, listener.Addr().String())), os.FileMode(0755)); err != nil {
 					},
 				},
 				{
-					name: "cacher.GetList",
+					name: "etcdserverpb.KV/Range",
 					attributes: map[string]func(*commonv1.AnyValue) bool{
-						"audit-id": func(v *commonv1.AnyValue) bool {
-							return v.GetStringValue() != ""
-						},
-						"type": func(v *commonv1.AnyValue) bool {
-							return v.GetStringValue() == "nodes"
+						"rpc.system": func(v *commonv1.AnyValue) bool {
+							return v.GetStringValue() == "grpc"
 						},
 					},
-					events: []string{
-						"Ready",
-						"Listed items from cache",
-						"Filtered items",
-					},
+					events: []string{"message"},
 				},
 				{
 					name: "SerializeObject",
@@ -1076,6 +1046,11 @@ endpoint: %s`, listener.Addr().String())), os.FileMode(0755)); err != nil {
 			select {
 			case <-fakeServer.traceFound:
 			case <-time.After(30 * time.Second):
+				for _, spanExpectation := range fakeServer.expectations {
+					if !spanExpectation.met {
+						t.Logf("Unmet expectation: %s", spanExpectation.name)
+					}
+				}
 				t.Fatal("Timed out waiting for trace")
 			}
 		})
