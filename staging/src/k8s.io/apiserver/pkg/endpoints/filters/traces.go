@@ -45,6 +45,11 @@ func WithTracing(handler http.Handler, tp trace.TracerProvider) http.Handler {
 		}),
 	}
 	wrappedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Adjust otelhttp tracing start time to match the start time used
+		// for Prometheus metrics.
+		if startTime, ok := request.ReceivedTimestampFrom(r.Context()); ok {
+			r.WithContext(otelhttp.ContextWithStartTime(r.Context(), startTime))
+		}
 		// Add the http.target attribute to the otelhttp span
 		// Workaround for https://github.com/open-telemetry/opentelemetry-go-contrib/issues/3743
 		if r.URL != nil {
