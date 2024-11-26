@@ -21,7 +21,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	v1 "k8s.io/api/core/v1"
-	networkingv1beta1 "k8s.io/api/networking/v1beta1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -37,7 +37,7 @@ import (
 	admissionapi "k8s.io/pod-security-admission/api"
 )
 
-var _ = common.SIGDescribe(feature.ServiceCIDRs, framework.WithFeatureGate(features.MultiCIDRServiceAllocator), func() {
+var _ = common.SIGDescribe("Service CIDRs", func() {
 
 	fr := framework.NewDefaultFramework("servicecidrs")
 	fr.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
@@ -63,18 +63,20 @@ var _ = common.SIGDescribe(feature.ServiceCIDRs, framework.WithFeatureGate(featu
 
 	ginkgo.It("should create Services and serve on different Service CIDRs", func(ctx context.Context) {
 		// create a new service CIDR
-		svcCIDR := &networkingv1beta1.ServiceCIDR{
+		svcCIDR := &networkingv1.ServiceCIDR{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-svc-cidr",
 			},
-			Spec: networkingv1beta1.ServiceCIDRSpec{
+			Spec: networkingv1.ServiceCIDRSpec{
 				CIDRs: []string{"10.196.196.0/24"},
 			},
 		}
-		_, err := cs.NetworkingV1beta1().ServiceCIDRs().Create(context.TODO(), svcCIDR, metav1.CreateOptions{})
+		_, err := cs.NetworkingV1().ServiceCIDRs().Create(context.TODO(), svcCIDR, metav1.CreateOptions{})
 		framework.ExpectNoError(err, "error creating ServiceCIDR")
+		ginkgo.DeferCleanup(cs.NetworkingV1().ServiceCIDRs().Delete, svcCIDR.Name, metav1.DeleteOptions{})
+
 		if pollErr := wait.PollUntilContextTimeout(ctx, framework.Poll, e2eservice.RespondingTimeout, false, func(ctx context.Context) (bool, error) {
-			svcCIDR, err := cs.NetworkingV1beta1().ServiceCIDRs().Get(ctx, svcCIDR.Name, metav1.GetOptions{})
+			svcCIDR, err := cs.NetworkingV1().ServiceCIDRs().Get(ctx, svcCIDR.Name, metav1.GetOptions{})
 			if err != nil {
 				return false, nil
 			}
@@ -95,6 +97,10 @@ var _ = common.SIGDescribe(feature.ServiceCIDRs, framework.WithFeatureGate(featu
 			}
 		})
 		framework.ExpectNoError(err)
+		ginkgo.DeferCleanup(func(ctx context.Context) {
+			err := cs.CoreV1().Services(ns).Delete(ctx, serviceName, metav1.DeleteOptions{})
+			framework.ExpectNoError(err, "failed to delete service: %s in namespace: %s", serviceName, ns)
+		})
 		err = jig.CreateServicePods(ctx, 2)
 		framework.ExpectNoError(err)
 		execPod := e2epod.CreateExecPodOrFail(ctx, cs, ns, "execpod", nil)
@@ -104,13 +110,13 @@ var _ = common.SIGDescribe(feature.ServiceCIDRs, framework.WithFeatureGate(featu
 
 })
 
-func isReady(serviceCIDR *networkingv1beta1.ServiceCIDR) bool {
+func isReady(serviceCIDR *networkingv1.ServiceCIDR) bool {
 	if serviceCIDR == nil {
 		return false
 	}
 
 	for _, condition := range serviceCIDR.Status.Conditions {
-		if condition.Type == string(networkingv1beta1.ServiceCIDRConditionReady) {
+		if condition.Type == string(networkingv1.ServiceCIDRConditionReady) {
 			return condition.Status == metav1.ConditionStatus(metav1.ConditionTrue)
 		}
 	}
