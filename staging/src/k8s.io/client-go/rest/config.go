@@ -136,7 +136,7 @@ type Config struct {
 	WarningHandler WarningHandler
 
 	// WarningHandlerWithContext handles warnings in server responses.
-	// If this and WarningHandlerWithContext are not set, the
+	// If this and WarningHandler are not set, the
 	// default warning handler is used. If both are set,
 	// WarningHandlerWithContext is used.
 	//

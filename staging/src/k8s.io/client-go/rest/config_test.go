@@ -41,6 +41,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	fuzz "github.com/google/gofuzz"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsConfigTransportTLS(t *testing.T) {
@@ -265,6 +266,14 @@ var fakeWrapperFunc = func(http.RoundTripper) http.RoundTripper {
 type fakeWarningHandler struct{}
 
 func (f fakeWarningHandler) HandleWarningHeader(code int, agent string, message string) {}
+
+type fakeWarningHandlerWithLogging struct {
+	messages []string
+}
+
+func (f *fakeWarningHandlerWithLogging) HandleWarningHeader(code int, agent string, message string) {
+	f.messages = append(f.messages, message)
+}
 
 type fakeWarningHandlerWithContext struct{}
 
@@ -652,4 +661,46 @@ func TestConfigSprint(t *testing.T) {
 			t.Errorf("fmt.Sprintf(%q, c)\ngot:  %q\nwant: %q\ndiff: %s", f, got, want, cmp.Diff(want, got))
 		}
 	}
+}
+
+func TestConfigWarningHandler(t *testing.T) {
+	config := &Config{}
+	config.GroupVersion = &schema.GroupVersion{}
+	config.NegotiatedSerializer = &fakeNegotiatedSerializer{}
+	handlerNoContext := &fakeWarningHandler{}
+	handlerWithContext := &fakeWarningHandlerWithContext{}
+
+	t.Run("none", func(t *testing.T) {
+		client, err := RESTClientForConfigAndClient(config, nil)
+		require.NoError(t, err)
+		assert.Nil(t, client.warningHandler)
+	})
+
+	t.Run("no-context", func(t *testing.T) {
+		config := CopyConfig(config)
+		handler := &fakeWarningHandlerWithLogging{}
+		config.WarningHandler = handler
+		client, err := RESTClientForConfigAndClient(config, nil)
+		require.NoError(t, err)
+		client.warningHandler.HandleWarningHeaderWithContext(context.Background(), 0, "", "message")
+		assert.Equal(t, []string{"message"}, handler.messages)
+
+	})
+
+	t.Run("with-context", func(t *testing.T) {
+		config := CopyConfig(config)
+		config.WarningHandlerWithContext = handlerWithContext
+		client, err := RESTClientForConfigAndClient(config, nil)
+		require.NoError(t, err)
+		assert.Equal(t, handlerWithContext, client.warningHandler)
+	})
+
+	t.Run("both", func(t *testing.T) {
+		config := CopyConfig(config)
+		config.WarningHandler = handlerNoContext
+		config.WarningHandlerWithContext = handlerWithContext
+		client, err := RESTClientForConfigAndClient(config, nil)
+		require.NoError(t, err)
+		assert.Equal(t, handlerWithContext, client.warningHandler)
+	})
 }

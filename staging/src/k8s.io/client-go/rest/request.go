@@ -290,6 +290,10 @@ func (r *Request) BackOffWithContext(manager BackoffManagerWithContext) *Request
 //
 //logcheck:context // WarningHandlerWithContext should be used instead of WarningHandler in code which supports contextual logging.
 func (r *Request) WarningHandler(handler WarningHandler) *Request {
+	if handler == nil {
+		r.warningHandler = nil
+		return r
+	}
 	r.warningHandler = warningLoggerNopContext{l: handler}
 	return r
 }

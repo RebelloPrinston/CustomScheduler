@@ -54,6 +54,10 @@ var (
 //
 // logcheck:context // SetDefaultWarningHandlerWithContext should be used instead of SetDefaultWarningHandler in code which supports contextual logging.
 func SetDefaultWarningHandler(l WarningHandler) {
+	if l == nil {
+		SetDefaultWarningHandlerWithContext(nil)
+		return
+	}
 	SetDefaultWarningHandlerWithContext(warningLoggerNopContext{l: l})
 }
 

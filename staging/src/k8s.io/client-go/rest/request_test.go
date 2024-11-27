@@ -4188,3 +4188,39 @@ func TestRequestLogging(t *testing.T) {
 		})
 	}
 }
+
+func TestRequestWarningHandler(t *testing.T) {
+	t.Run("no-context", func(t *testing.T) {
+		request := &Request{}
+		handler := &fakeWarningHandlerWithLogging{}
+		//nolint:logcheck
+		assert.Equal(t, request, request.WarningHandler(handler))
+		assert.NotNil(t, request.warningHandler)
+		request.warningHandler.HandleWarningHeaderWithContext(context.Background(), 0, "", "message")
+		assert.Equal(t, []string{"message"}, handler.messages)
+	})
+
+	t.Run("with-context", func(t *testing.T) {
+		request := &Request{}
+		handler := &fakeWarningHandlerWithContext{}
+		assert.Equal(t, request, request.WarningHandlerWithContext(handler))
+		assert.Equal(t, request.warningHandler, handler)
+	})
+
+	t.Run("nil-no-context", func(t *testing.T) {
+		request := &Request{
+			warningHandler: &fakeWarningHandlerWithContext{},
+		}
+		//nolint:logcheck
+		assert.Equal(t, request, request.WarningHandler(nil))
+		assert.Nil(t, request.warningHandler)
+	})
+
+	t.Run("nil-with-context", func(t *testing.T) {
+		request := &Request{
+			warningHandler: &fakeWarningHandlerWithContext{},
+		}
+		assert.Equal(t, request, request.WarningHandlerWithContext(nil))
+		assert.Nil(t, request.warningHandler)
+	})
+}
