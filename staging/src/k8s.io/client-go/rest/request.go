@@ -54,7 +54,7 @@ import (
 	"k8s.io/utils/clock"
 )
 
-var (
+const (
 	// longThrottleLatency defines threshold for logging requests. All requests being
 	// throttled (via the provided rateLimiter) for more than longThrottleLatency will
 	// be logged.
@@ -682,11 +682,12 @@ func (r *Request) tryThrottleWithInfo(ctx context.Context, retryInfo string) err
 			retryInfo = "client-side throttling, not priority and fairness"
 		}
 		klog.FromContext(ctx).V(3).Info("Waited before sending request", "delay", latency, "reason", retryInfo, "verb", r.verb, "URL", r.URL())
-	}
-	if latency > extraLongThrottleLatency {
-		// If the rate limiter latency is very high, the log message should be printed at a higher log level,
-		// but we use a throttled logger to prevent spamming.
-		globalThrottledLogger.info(klog.FromContext(ctx), "Waited before sending request", "delay", latency, "reason", retryInfo, "verb", r.verb, "URL", r.URL())
+
+		if latency > extraLongThrottleLatency {
+			// If the rate limiter latency is very high, the log message should be printed at a higher log level,
+			// but we use a throttled logger to prevent spamming.
+			globalThrottledLogger.info(klog.FromContext(ctx), "Waited before sending request", "delay", latency, "reason", retryInfo, "verb", r.verb, "URL", r.URL())
+		}
 	}
 	metrics.RateLimiterLatency.Observe(ctx, r.verb, r.finalURLTemplate(), latency)
 
