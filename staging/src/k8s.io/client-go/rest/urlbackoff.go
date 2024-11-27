@@ -36,7 +36,7 @@ var maxResponseCode = 499
 
 //go:generate mockery
 
-// Deprecated: BackoffManager.Sleep] ignores the caller's context. Use BackoffManagerWithContext instead.
+// Deprecated: [BackoffManager.Sleep] ignores the caller's context. Use BackoffManagerWithContext instead.
 type BackoffManager interface {
 	UpdateBackoff(actualURL *url.URL, err error, responseCode int)
 	CalculateBackoff(actualURL *url.URL) time.Duration
