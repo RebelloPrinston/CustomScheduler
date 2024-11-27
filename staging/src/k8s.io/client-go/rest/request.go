@@ -1292,7 +1292,7 @@ func (r *Request) Do(ctx context.Context) Result {
 		result = r.transformResponse(ctx, resp, req)
 	})
 	if err != nil {
-		return Result{err: err, loggingCtx: context.WithoutCancel(ctx)}
+		return Result{err: err, logger: klog.FromContext(ctx)}
 	}
 	if result.err == nil || len(result.body) > 0 {
 		metrics.ResponseSize.Observe(ctx, r.verb, r.URL().Host, float64(len(result.body)))
@@ -1342,15 +1342,15 @@ func (r *Request) transformResponse(ctx context.Context, resp *http.Response, re
 			klog.FromContext(ctx).V(2).Info("Stream error when reading response body, may be caused by closed connection", "err", err)
 			streamErr := fmt.Errorf("stream error when reading response body, may be caused by closed connection. Please retry. Original error: %w", err)
 			return Result{
-				err:        streamErr,
-				loggingCtx: context.WithoutCancel(ctx),
+				err:    streamErr,
+				logger: klog.FromContext(ctx),
 			}
 		default:
 			klog.FromContext(ctx).Error(err, "Unexpected error when reading response body")
 			unexpectedErr := fmt.Errorf("unexpected error when reading response body. Please retry. Original error: %w", err)
 			return Result{
-				err:        unexpectedErr,
-				loggingCtx: context.WithoutCancel(ctx),
+				err:    unexpectedErr,
+				logger: klog.FromContext(ctx),
 			}
 		}
 	}
@@ -1368,7 +1368,7 @@ func (r *Request) transformResponse(ctx context.Context, resp *http.Response, re
 		var err error
 		mediaType, params, err := mime.ParseMediaType(contentType)
 		if err != nil {
-			return Result{err: errors.NewInternalError(err), loggingCtx: context.WithoutCancel(ctx)}
+			return Result{err: errors.NewInternalError(err), logger: klog.FromContext(ctx)}
 		}
 		decoder, err = r.contentConfig.Negotiator.Decoder(mediaType, params)
 		if err != nil {
@@ -1377,14 +1377,14 @@ func (r *Request) transformResponse(ctx context.Context, resp *http.Response, re
 			case resp.StatusCode == http.StatusSwitchingProtocols:
 				// no-op, we've been upgraded
 			case resp.StatusCode < http.StatusOK || resp.StatusCode > http.StatusPartialContent:
-				return Result{err: r.transformUnstructuredResponseError(resp, req, body), loggingCtx: context.WithoutCancel(ctx)}
+				return Result{err: r.transformUnstructuredResponseError(resp, req, body), logger: klog.FromContext(ctx)}
 			}
 			return Result{
 				body:        body,
 				contentType: contentType,
 				statusCode:  resp.StatusCode,
 				warnings:    handleWarnings(ctx, resp.Header, r.warningHandler),
-				loggingCtx:  context.WithoutCancel(ctx),
+				logger:      klog.FromContext(ctx),
 			}
 		}
 	}
@@ -1404,7 +1404,7 @@ func (r *Request) transformResponse(ctx context.Context, resp *http.Response, re
 			decoder:     decoder,
 			err:         err,
 			warnings:    handleWarnings(ctx, resp.Header, r.warningHandler),
-			loggingCtx:  context.WithoutCancel(ctx),
+			logger:      klog.FromContext(ctx),
 		}
 	}
 
@@ -1414,7 +1414,7 @@ func (r *Request) transformResponse(ctx context.Context, resp *http.Response, re
 		statusCode:  resp.StatusCode,
 		decoder:     decoder,
 		warnings:    handleWarnings(ctx, resp.Header, r.warningHandler),
-		loggingCtx:  context.WithoutCancel(ctx),
+		logger:      klog.FromContext(ctx),
 	}
 }
 
@@ -1545,10 +1545,7 @@ type Result struct {
 	contentType string
 	err         error
 	statusCode  int
-
-	// Log calls in Result methods use the same context for logging as the
-	// method which created the Result. This context has no cancellation.
-	loggingCtx context.Context
+	logger      klog.Logger
 
 	decoder runtime.Decoder
 }
@@ -1654,11 +1651,7 @@ func (r Result) Error() error {
 	// to be backwards compatible with old servers that do not return a version, default to "v1"
 	out, _, err := r.decoder.Decode(r.body, &schema.GroupVersionKind{Version: "v1"}, nil)
 	if err != nil {
-		ctx := r.loggingCtx
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		klog.FromContext(ctx).V(5).Info("Body was not decodable (unable to check for Status)", "err", err)
+		r.logger.V(5).Info("Body was not decodable (unable to check for Status)", "err", err)
 		return r.err
 	}
 	switch t := out.(type) {
