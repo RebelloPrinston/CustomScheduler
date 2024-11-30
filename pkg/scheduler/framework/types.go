@@ -391,6 +391,9 @@ type QueuedPodInfo struct {
 	PendingPlugins sets.Set[string]
 	// GatingPlugin records the plugin name that gated the Pod at PreEnqueue.
 	GatingPlugin string
+	// GatingPluginEvents records the events registered by the plugin that gated the Pod at PreEnqueue.
+	// We have it as a cache purpose to avoid re-computing which event(s) might ungate the Pod.
+	GatingPluginEvents []ClusterEvent
 }
 
 // Gated returns true if the pod is gated by any plugin.
@@ -400,6 +403,9 @@ func (pqi *QueuedPodInfo) Gated() bool {
 
 // DeepCopy returns a deep copy of the QueuedPodInfo object.
 func (pqi *QueuedPodInfo) DeepCopy() *QueuedPodInfo {
+	copyGatingPluginEvents := make([]ClusterEvent, len(pqi.GatingPluginEvents))
+	copy(copyGatingPluginEvents, pqi.GatingPluginEvents)
+
 	return &QueuedPodInfo{
 		PodInfo:                 pqi.PodInfo.DeepCopy(),
 		Timestamp:               pqi.Timestamp,
@@ -407,6 +413,7 @@ func (pqi *QueuedPodInfo) DeepCopy() *QueuedPodInfo {
 		InitialAttemptTimestamp: pqi.InitialAttemptTimestamp,
 		UnschedulablePlugins:    pqi.UnschedulablePlugins.Clone(),
 		GatingPlugin:            pqi.GatingPlugin,
+		GatingPluginEvents:      copyGatingPluginEvents,
 		PendingPlugins:          pqi.PendingPlugins.Clone(),
 	}
 }

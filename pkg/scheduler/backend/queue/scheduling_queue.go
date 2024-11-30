@@ -181,7 +181,7 @@ type PriorityQueue struct {
 	// TODO: this will be removed after SchedulingQueueHint goes to stable and the feature gate is removed.
 	moveRequestCycle int64
 
-	// preEnqueuePluginMap is keyed with profile name, valued with registered preEnqueue plugins.
+	// preEnqueuePluginMap is keyed with profile and plugin name, valued with registered preEnqueue plugins.
 	preEnqueuePluginMap map[string]map[string]framework.PreEnqueuePlugin
 	// queueingHintMap is keyed with profile name, valued with registered queueing hint functions.
 	queueingHintMap QueueingHintMapPerProfile
@@ -579,6 +579,7 @@ func (p *PriorityQueue) runPreEnqueuePlugin(ctx context.Context, logger klog.Log
 	pInfo.UnschedulablePlugins.Insert(pl.Name())
 	metrics.UnschedulableReason(pl.Name(), pod.Spec.SchedulerName).Inc()
 	pInfo.GatingPlugin = pl.Name()
+	pInfo.GatingPluginEvents = p.pluginToEventsMap[pInfo.GatingPlugin]
 	if s.Code() == framework.Error {
 		logger.Error(s.AsError(), "Unexpected error running PreEnqueue plugin", "pod", klog.KObj(pod), "plugin", pl.Name())
 	} else {
@@ -1132,7 +1133,7 @@ func (p *PriorityQueue) movePodsToActiveOrBackoffQueue(logger klog.Logger, podIn
 
 	activated := false
 	for _, pInfo := range podInfoList {
-		if pInfo.Gated() && len(p.pluginToEventsMap[pInfo.GatingPlugin]) != 0 && !event.MatchAny(p.pluginToEventsMap[pInfo.GatingPlugin]) {
+		if pInfo.Gated() && len(pInfo.GatingPluginEvents) != 0 && !event.MatchAny(pInfo.GatingPluginEvents) {
 			// This event doesn't interest the gating plugin of this Pod,
 			// which means this event never moves this Pod to activeQ.
 			continue
