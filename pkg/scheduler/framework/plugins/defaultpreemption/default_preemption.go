@@ -130,7 +130,7 @@ func (pl *DefaultPreemption) EventsToRegister(_ context.Context) ([]framework.Cl
 // isPodSchedulableAfterPodDeletion returns the queueing hint for the pod after the pod deletion event,
 // which always return Skip.
 // The default preemption plugin is a bit tricky;
-// the pods rejected by it are the ones that have run/are running the preemption.
+// the pods rejected by it are the ones that have run/are running the preemption asynchronously.
 // And, those pods should always have the other plugins in pInfo.UnschedulablePlugins
 // which failure will be resolved by the preemption.
 // The reason why we return Skip here is that the preemption plugin should not make the decision of when to requeueing Pods,

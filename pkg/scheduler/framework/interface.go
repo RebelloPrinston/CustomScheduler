@@ -478,8 +478,10 @@ type QueueSortPlugin interface {
 //
 // Plugins that make pod unschedulable (PreEnqueue, PreFilter, Filter, Reserve, and Permit plugins) must implement this interface,
 // otherwise the default implementation will be used, which is less efficient in requeueing Pods rejected by the plugin.
-// Also, if EventsToRegister returns an empty, that means the Pods failed by the plugin are not requeued by any events,
-// which doesn't make sense in most cases and hence likely the misuse.
+//
+// Also, if EventsToRegister returns an empty list, that means the Pods failed by the plugin are not requeued by any events,
+// which doesn't make sense in most cases (very likely misuse)
+// since the pods rejected by the plugin could be stuck in the unschedulable pod pool forever.
 //
 // If plugins other than above extension points support this interface, they are just ignored.
 type EnqueueExtensions interface {
