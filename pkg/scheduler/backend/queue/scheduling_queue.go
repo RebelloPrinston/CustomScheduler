@@ -1133,7 +1133,7 @@ func (p *PriorityQueue) movePodsToActiveOrBackoffQueue(logger klog.Logger, podIn
 
 	activated := false
 	for _, pInfo := range podInfoList {
-		if pInfo.Gated() && len(pInfo.GatingPluginEvents) != 0 && !event.MatchAny(pInfo.GatingPluginEvents) {
+		if pInfo.Gated() && (len(pInfo.GatingPluginEvents) == 0 || !event.MatchAny(pInfo.GatingPluginEvents)) {
 			// This event doesn't interest the gating plugin of this Pod,
 			// which means this event never moves this Pod to activeQ.
 			continue
