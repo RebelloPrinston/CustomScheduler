@@ -108,10 +108,11 @@ func init() {
 	metrics.Register()
 }
 
-func setQueuedPodInfoGated(queuedPodInfo *framework.QueuedPodInfo, gatingPlugin string) *framework.QueuedPodInfo {
+func setQueuedPodInfoGated(queuedPodInfo *framework.QueuedPodInfo, gatingPlugin string, gatingPluginEvents []framework.ClusterEvent) *framework.QueuedPodInfo {
 	queuedPodInfo.GatingPlugin = gatingPlugin
 	// GatingPlugin should also be registered in UnschedulablePlugins.
 	queuedPodInfo.UnschedulablePlugins = sets.New(gatingPlugin)
+	queuedPodInfo.GatingPluginEvents = gatingPluginEvents
 	return queuedPodInfo
 }
 
@@ -1682,7 +1683,7 @@ func TestPriorityQueue_MoveAllToActiveOrBackoffQueueWithQueueingHint(t *testing.
 		},
 		{
 			name:    "QueueHintFunction is not called when Pod is gated by the plugin that isn't interested in the event",
-			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p)}, names.SchedulingGates),
+			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p)}, names.SchedulingGates, []framework.ClusterEvent{framework.EventUnscheduledPodUpdate}),
 			// The hintFn should not be called as the pod is gated by SchedulingGates plugin,
 			// the scheduling gate isn't interested in the node add event,
 			// and the queue should keep this Pod in the unschedQ without calling the hintFn.
@@ -1693,7 +1694,7 @@ func TestPriorityQueue_MoveAllToActiveOrBackoffQueueWithQueueingHint(t *testing.
 		},
 		{
 			name:    "QueueHintFunction is called when Pod is gated by the plugin that is interested in the event",
-			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p)}, "foo"),
+			podInfo: setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p)}, "foo", []framework.ClusterEvent{nodeAdd}),
 			// In this case, the hintFn should be called as the pod is gated by foo plugin that is interested in the NodeAdd event.
 			hint: queueHintReturnQueue,
 			// and, as a result, this pod should be queued to activeQ.
@@ -1701,7 +1702,7 @@ func TestPriorityQueue_MoveAllToActiveOrBackoffQueueWithQueueingHint(t *testing.
 		},
 		{
 			name:      "Pod that experienced a scheduling failure before should be queued to backoffQ after un-gated",
-			podInfo:   setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), Attempts: 1}, "foo"),
+			podInfo:   setQueuedPodInfoGated(&framework.QueuedPodInfo{PodInfo: mustNewPodInfo(p), Attempts: 1}, "foo", []framework.ClusterEvent{nodeAdd}),
 			hint:      queueHintReturnQueue,
 			expectedQ: backoffQ,
 		},
@@ -3136,7 +3137,7 @@ func TestPendingPodsMetric(t *testing.T) {
 	gated := makeQueuedPodInfos(total-queueableNum, "y", failme, timestamp)
 	// Manually mark them as gated=true.
 	for _, pInfo := range gated {
-		setQueuedPodInfoGated(pInfo, preenqueuePluginName)
+		setQueuedPodInfoGated(pInfo, preenqueuePluginName, []framework.ClusterEvent{framework.EventUnscheduledPodUpdate})
 	}
 	pInfos = append(pInfos, gated...)
 	totalWithDelay := 20
