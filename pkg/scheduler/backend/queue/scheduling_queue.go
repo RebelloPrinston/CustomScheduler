@@ -774,9 +774,14 @@ func (p *PriorityQueue) AddUnschedulableIfNotPresent(logger klog.Logger, pInfo *
 		return fmt.Errorf("Pod %v is already present in the backoff queue", klog.KObj(pod))
 	}
 
-	if pInfo.UnschedulablePlugins.Union(pInfo.PendingPlugins).Len() != 0 {
+	if pInfo.UnschedulablePlugins.Union(pInfo.PendingPlugins).Len() == 0 {
+		// This Pod came back because of some unexpected errors (e.g., a network issue).
+		pInfo.ErrorCount++
+	} else {
 		// This Pod is rejected by some plugins, not coming back due to unexpected errors (e.g., a network issue)
 		pInfo.UnschedulableCount++
+		// We should reset the error count because the error is not gone.
+		pInfo.ErrorCount = 0
 	}
 
 	if !p.isSchedulingQueueHintEnabled {
@@ -1314,14 +1319,21 @@ func (p *PriorityQueue) getBackoffTime(podInfo *framework.QueuedPodInfo) time.Ti
 // calculateBackoffDuration is a helper function for calculating the backoffDuration
 // based on the number of attempts the pod has made.
 func (p *PriorityQueue) calculateBackoffDuration(podInfo *framework.QueuedPodInfo) time.Duration {
-	if podInfo.UnschedulableCount == 0 {
+	if podInfo.UnschedulableCount == 0 && podInfo.ErrorCount == 0 {
 		// When the Pod hasn't experienced any scheduling attempts,
-		// they aren't obliged to get a backoff penalty at all.
+		// they don't have to get a backoff.
 		return 0
 	}
 
 	duration := p.podInitialBackoffDuration
-	for i := 1; i < podInfo.UnschedulableCount; i++ {
+	count := podInfo.UnschedulableCount
+	if podInfo.ErrorCount > 0 {
+		// This Pod has experienced an error status at the last scheduling cycle,
+		// and we should consider the error count for the backoff duration.
+		count = podInfo.ErrorCount
+	}
+
+	for i := 1; i < count; i++ {
 		// Use subtraction instead of addition or multiplication to avoid overflow.
 		if duration > p.podMaxBackoffDuration-duration {
 			return p.podMaxBackoffDuration
