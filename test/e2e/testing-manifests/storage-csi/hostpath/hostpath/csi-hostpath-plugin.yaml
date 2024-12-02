@@ -354,7 +354,7 @@ spec:
               name: socket-dir
 
         - name: csi-snapshotter
-          image: quay.io/madhupr001/csi-snapshotter:latest
+          image: quay.io/madhupr001/csi-snapshotter:use-owner-ref
           args:
             - -v=5
             - --csi-address=/csi/csi.sock

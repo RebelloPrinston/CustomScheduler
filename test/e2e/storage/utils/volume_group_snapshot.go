@@ -41,7 +41,8 @@ var (
 	// VolumeGroupSnapshotGVR is GroupVersionResource for volumegroupsnapshots
 	VolumeGroupSnapshotGVR = schema.GroupVersionResource{Group: VolumeGroupSnapshotAPIGroup, Version: "v1beta1", Resource: "volumegroupsnapshots"}
 	// VolumeGroupSnapshotClassGVR is GroupVersionResource for volumegroupsnapshotsclasses
-	VolumeGroupSnapshotClassGVR = schema.GroupVersionResource{Group: VolumeGroupSnapshotAPIGroup, Version: "v1beta1", Resource: "volumegroupsnapshotclasses"}
+	VolumeGroupSnapshotClassGVR   = schema.GroupVersionResource{Group: VolumeGroupSnapshotAPIGroup, Version: "v1beta1", Resource: "volumegroupsnapshotclasses"}
+	VolumeGroupSnapshotContentGVR = schema.GroupVersionResource{Group: VolumeGroupSnapshotAPIGroup, Version: "v1beta1", Resource: "volumegroupsnapshotcontents"}
 )
 
 // WaitForVolumeGroupSnapshotReady waits for a VolumeGroupSnapshot to be ready to use or until timeout occurs, whichever comes first.
@@ -56,6 +57,7 @@ func WaitForVolumeGroupSnapshotReady(ctx context.Context, c dynamic.Interface, n
 		}
 
 		status := volumeGroupSnapshot.Object["status"]
+		framework.Logf("vGs: %v", volumeGroupSnapshot.Object)
 		if status == nil {
 			framework.Logf("VolumeGroupSnapshot %s found but is not ready.", volumeGroupSnapshotName)
 			return false
