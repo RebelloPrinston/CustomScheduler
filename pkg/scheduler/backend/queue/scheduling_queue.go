@@ -774,13 +774,13 @@ func (p *PriorityQueue) AddUnschedulableIfNotPresent(logger klog.Logger, pInfo *
 		return fmt.Errorf("Pod %v is already present in the backoff queue", klog.KObj(pod))
 	}
 
-	if pInfo.UnschedulablePlugins.Union(pInfo.PendingPlugins).Len() == 0 {
+	if len(pInfo.UnschedulablePlugins) == 0 && len(pInfo.PendingPlugins) == 0 {
 		// This Pod came back because of some unexpected errors (e.g., a network issue).
 		pInfo.ErrorCount++
 	} else {
 		// This Pod is rejected by some plugins, not coming back due to unexpected errors (e.g., a network issue)
 		pInfo.UnschedulableCount++
-		// We should reset the error count because the error is not gone.
+		// We should reset the error count because the error is gone.
 		pInfo.ErrorCount = 0
 	}
 
