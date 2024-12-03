@@ -19,6 +19,7 @@ package framework
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -403,9 +404,6 @@ func (pqi *QueuedPodInfo) Gated() bool {
 
 // DeepCopy returns a deep copy of the QueuedPodInfo object.
 func (pqi *QueuedPodInfo) DeepCopy() *QueuedPodInfo {
-	copyGatingPluginEvents := make([]ClusterEvent, len(pqi.GatingPluginEvents))
-	copy(copyGatingPluginEvents, pqi.GatingPluginEvents)
-
 	return &QueuedPodInfo{
 		PodInfo:                 pqi.PodInfo.DeepCopy(),
 		Timestamp:               pqi.Timestamp,
@@ -413,7 +411,7 @@ func (pqi *QueuedPodInfo) DeepCopy() *QueuedPodInfo {
 		InitialAttemptTimestamp: pqi.InitialAttemptTimestamp,
 		UnschedulablePlugins:    pqi.UnschedulablePlugins.Clone(),
 		GatingPlugin:            pqi.GatingPlugin,
-		GatingPluginEvents:      copyGatingPluginEvents,
+		GatingPluginEvents:      slices.Clone(pqi.GatingPluginEvents),
 		PendingPlugins:          pqi.PendingPlugins.Clone(),
 	}
 }
