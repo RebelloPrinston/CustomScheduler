@@ -40,6 +40,7 @@ import (
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	fcclient "k8s.io/client-go/kubernetes/typed/flowcontrol/v1"
 	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/ktesting"
 	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 )
@@ -389,8 +390,8 @@ func TestAPFControllerWithGracefulShutdown(t *testing.T) {
 		QueueSetFactory:        cts,
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, _ = context.WithTimeout(ctx, 5*time.Second)
 
 	informerFactory.Start(ctx.Done())
 
