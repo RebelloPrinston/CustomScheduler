@@ -1106,7 +1106,7 @@ func startAPFController(t *testing.T, ctx context.Context, apfConfiguration []ru
 	}
 
 	if err := controller.Start(ctx); err != nil {
-		return nil, err
+		t.Fatalf("Failed to start the controller: %v", err)
 	}
 
 	// make sure that apf controller syncs the priority level configuration object we are using in this test.
