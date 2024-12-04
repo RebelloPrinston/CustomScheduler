@@ -391,7 +391,8 @@ func TestAPFControllerWithGracefulShutdown(t *testing.T) {
 	})
 
 	_, ctx := ktesting.NewTestContext(t)
-	ctx, _ = context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
 	informerFactory.Start(ctx.Done())
 
