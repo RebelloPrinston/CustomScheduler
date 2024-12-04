@@ -665,6 +665,12 @@ func TestSchedulerScheduleOne(t *testing.T) {
 	errS := errors.New("scheduler")
 	errB := errors.New("binder")
 	preBindErr := errors.New("on PreBind")
+	podStatusConditions := []v1.PodCondition{
+		{
+			Type:   v1.PodScheduled,
+			Status: v1.ConditionTrue,
+		},
+	}
 
 	table := []struct {
 		name                string
@@ -851,6 +857,17 @@ func TestSchedulerScheduleOne(t *testing.T) {
 				}
 				if diff := cmp.Diff(item.expectBind, gotBinding); diff != "" {
 					t.Errorf("got binding diff (-want, +got): %s", diff)
+				}
+				if item.eventReason == "Scheduled" {
+					updatedPod, err := client.CoreV1().Pods(item.sendPod.Namespace).Get(ctx, item.sendPod.Name, metav1.GetOptions{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					podStatusConditions[0].LastTransitionTime = updatedPod.Status.Conditions[0].LastTransitionTime
+
+					if !reflect.DeepEqual(updatedPod.Status.Conditions, podStatusConditions) {
+						t.Errorf("conditions want=%v, get=%v", podStatusConditions, updatedPod.Status.Conditions)
+					}
 				}
 				// We have to use wait here
 				// because the Pod goes to the binding cycle in some test cases and the inflight pods might not be empty immediately at this point in such case.
