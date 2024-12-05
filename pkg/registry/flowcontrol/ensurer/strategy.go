@@ -286,7 +286,7 @@ func EnsureConfiguration[ObjectType configurationObjectType](ctx context.Context
 	}
 	if !update {
 		if v5 := logger.V(5); v5.Enabled() {
-			v5.Info("No update required", "wrapper", bootstrap.GetObjectKind().GroupVersionKind().Kind, "diff", cmp.Diff(current, bootstrap))
+			v5.Info("No update required", "wrapper", bootstrap.GetObjectKind().GroupVersionKind().Kind)
 		}
 		return nil
 	}
