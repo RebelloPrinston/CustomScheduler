@@ -17,28 +17,48 @@ limitations under the License.
 package cached
 
 import (
+	"context"
 	"sync"
 
 	"k8s.io/client-go/openapi"
 )
 
-type client struct {
-	delegate openapi.Client
+type Client struct {
+	delegate openapi.ClientWithContext
 
 	once   sync.Once
 	result map[string]openapi.GroupVersion
 	err    error
 }
 
+var (
+	_ openapi.Client            = &Client{}
+	_ openapi.ClientWithContext = &Client{}
+)
+
+// Deprecated: use [NewClientWithContext] instead.
 func NewClient(other openapi.Client) openapi.Client {
-	return &client{
+	return newClient(openapi.Client2Context(other))
+}
+
+func NewClientWithContext(other openapi.ClientWithContext) *Client {
+	return newClient(other)
+}
+
+func newClient(other openapi.ClientWithContext) *Client {
+	return &Client{
 		delegate: other,
 	}
 }
 
-func (c *client) Paths() (map[string]openapi.GroupVersion, error) {
+// Deprecated: use [PathsWithContext] instead.
+func (c *Client) Paths() (map[string]openapi.GroupVersion, error) {
+	return c.PathsWithContext(context.Background())
+}
+
+func (c *Client) PathsWithContext(ctx context.Context) (map[string]openapi.GroupVersion, error) {
 	c.once.Do(func() {
-		uncached, err := c.delegate.Paths()
+		uncached, err := c.delegate.PathsWithContext(ctx)
 		if err != nil {
 			c.err = err
 			return

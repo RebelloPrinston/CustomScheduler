@@ -25,8 +25,33 @@ import (
 	"k8s.io/kube-openapi/pkg/handler3"
 )
 
+// Deprecated: use ClientWithContext instead.
 type Client interface {
 	Paths() (map[string]GroupVersion, error)
+}
+
+type ClientWithContext interface {
+	PathsWithContext(ctx context.Context) (map[string]GroupVersion, error)
+}
+
+func Client2Context(c Client) ClientWithContext {
+	if c == nil {
+		return nil
+	}
+	if c, ok := c.(ClientWithContext); ok {
+		return c
+	}
+	return clientWrapper{
+		parent: c,
+	}
+}
+
+type clientWrapper struct {
+	parent Client
+}
+
+func (c clientWrapper) PathsWithContext(ctx context.Context) (map[string]GroupVersion, error) {
+	return c.parent.Paths()
 }
 
 type client struct {
@@ -34,16 +59,30 @@ type client struct {
 	restClient rest.Interface
 }
 
+// Deprecated: use NewClientWithContext instead.
 func NewClient(restClient rest.Interface) Client {
+	return newClient(restClient)
+}
+
+func NewClientWithContext(restClient rest.Interface) ClientWithContext {
+	return newClient(restClient)
+}
+
+func newClient(restClient rest.Interface) *client {
 	return &client{
 		restClient: restClient,
 	}
 }
 
+// Deprecated: use PathsWithContext instead.
 func (c *client) Paths() (map[string]GroupVersion, error) {
+	return c.PathsWithContext(context.Background())
+}
+
+func (c *client) PathsWithContext(ctx context.Context) (map[string]GroupVersion, error) {
 	data, err := c.restClient.Get().
 		AbsPath("/openapi/v3").
-		Do(context.TODO()).
+		Do(ctx).
 		Raw()
 
 	if err != nil {
