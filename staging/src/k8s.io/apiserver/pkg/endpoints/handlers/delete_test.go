@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,7 +41,10 @@ import (
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	"k8s.io/apiserver/pkg/endpoints/handlers/negotiation"
 	"k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/features"
 	"k8s.io/apiserver/pkg/registry/rest"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
 
 	"k8s.io/utils/pointer"
 	"k8s.io/utils/ptr"
@@ -214,6 +218,366 @@ func TestDeleteCollection(t *testing.T) {
 		})
 	}
 }
+
+func TestDeleteResourceUsesUnsafeDeleter(t *testing.T) {
+	tests := []struct {
+		name                     string
+		featureEnabled           bool
+		provider                 bool
+		providerHasUnsafeDeleter bool
+		ignoreReadErr            bool
+		authorizer               authorizer.Authorizer
+		// want
+		regularDeleterInvoked int
+		unsafeDeleterInvoked  int
+		statusCode            int
+		errshouldContain      string
+		unsafeAnnotation      bool
+	}{
+		{
+			name:                     "feature disabled, ignore not set, should invoke normal deleter",
+			featureEnabled:           false,
+			ignoreReadErr:            false,
+			provider:                 false,
+			providerHasUnsafeDeleter: false,
+			regularDeleterInvoked:    1,
+			statusCode:               http.StatusOK,
+		},
+		{
+			name:                     "feature disabled, ignore set, should invoke normal deleter",
+			featureEnabled:           false,
+			ignoreReadErr:            true,
+			provider:                 false,
+			providerHasUnsafeDeleter: false,
+			regularDeleterInvoked:    1,
+			statusCode:               http.StatusOK,
+		},
+		{
+			name:                     "feature enabled, ignore not set, should invoke normal deleter",
+			featureEnabled:           true,
+			ignoreReadErr:            false,
+			provider:                 false,
+			providerHasUnsafeDeleter: false,
+			regularDeleterInvoked:    1,
+			statusCode:               http.StatusOK,
+		},
+		{
+			name:                     "feature enabled, ignore set, not a provider of unsafe deleter, error expected",
+			featureEnabled:           true,
+			ignoreReadErr:            true,
+			provider:                 false,
+			providerHasUnsafeDeleter: false,
+			statusCode:               http.StatusInternalServerError,
+			errshouldContain:         "no unsafe deleter provided, can not honor ignoreStoreReadErrorWithClusterBreakingPotential",
+			unsafeAnnotation:         true,
+		},
+		{
+			name:                     "feature enabled, ignore set, provider but no unsafe deleter, error expected",
+			featureEnabled:           true,
+			ignoreReadErr:            true,
+			provider:                 true,
+			providerHasUnsafeDeleter: false,
+			statusCode:               http.StatusInternalServerError,
+			errshouldContain:         "no unsafe deleter provided, can not honor ignoreStoreReadErrorWithClusterBreakingPotential",
+			unsafeAnnotation:         true,
+		},
+		{
+			name:                     "feature enabled, ignore set, provider returns unsafe deleter, no authorizer, error expected",
+			featureEnabled:           true,
+			ignoreReadErr:            true,
+			provider:                 true,
+			providerHasUnsafeDeleter: true,
+			statusCode:               http.StatusInternalServerError,
+			errshouldContain:         "Internal error occurred: no authorizer provided, unable to authorize unsafe delete",
+			unsafeAnnotation:         true,
+		},
+		{
+			name:                     "feature enabled, ignore set, provider returns unsafe deleter, not authorized, error expected",
+			featureEnabled:           true,
+			ignoreReadErr:            true,
+			provider:                 true,
+			providerHasUnsafeDeleter: true,
+			authorizer:               &fakeAuthorizer{decision: authorizer.DecisionDeny, reason: "not permitted"},
+			statusCode:               http.StatusForbidden,
+			errshouldContain:         "forbidden: not permitted to do",
+			unsafeAnnotation:         true,
+		},
+		{
+			name:                     "feature enabled, ignore set, provider returns unsafe deleter, authorized, unsafe delete invoked",
+			featureEnabled:           true,
+			ignoreReadErr:            true,
+			provider:                 true,
+			providerHasUnsafeDeleter: true,
+			authorizer:               &fakeAuthorizer{decision: authorizer.DecisionAllow, reason: "permitted"},
+			statusCode:               http.StatusOK,
+			unsafeDeleterInvoked:     1,
+			unsafeAnnotation:         true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.AllowUnsafeMalformedObjectDeletion, test.featureEnabled)
+
+			info, ok := runtime.SerializerInfoForMediaType(codecs.SupportedMediaTypes(), runtime.ContentTypeJSON)
+			if !ok {
+				t.Fatalf("failed to setup serializer")
+			}
+			scope := &RequestScope{
+				Namer:            &mockNamer{},
+				Serializer:       runtime.NewSimpleNegotiatedSerializer(info),
+				Authorizer:       test.authorizer,
+				MetaGroupVersion: metav1.SchemeGroupVersion,
+			}
+
+			// keep track of what the normal and unsafe deleter observes.
+			// the normal deleter should never see the option enabled, so
+			// setting it to true, so we can verify that it is reset to nil.
+			// on the other hand, the unsafe deleter should always see it enabled.
+			normalDeleterGot, unsafeDeleterGot := &holder{ignore: ptr.To[bool](true)}, &holder{}
+
+			unsafeDeleter := &fakeDeleter{unsafeDeleterGot}
+			var deleter rest.GracefulDeleter = &fakeDeleter{holder: normalDeleterGot}
+			switch {
+			case test.provider && test.providerHasUnsafeDeleter:
+				deleter = &corruptObjDeleterProvider{GracefulDeleter: deleter, unsafeDeleter: unsafeDeleter}
+			// provider, but it returns nil when asked for an unsafe deleter
+			case test.provider:
+				deleter = &corruptObjDeleterProvider{GracefulDeleter: deleter}
+			}
+
+			handler := DeleteResource(deleter, true, scope, &fakeAdmitter{})
+
+			req := newRequest(t, test.ignoreReadErr)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, req)
+
+			// verify the http response expected
+			resp := recorder.Result()
+
+			if want, got := test.statusCode, resp.StatusCode; want != got {
+				t.Errorf("expected status code: %d, but got: %d", want, got)
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("unexpected error reading response body: %v", err)
+			}
+			switch {
+			case len(test.errshouldContain) > 0:
+				if want, got := test.errshouldContain, string(body); !strings.Contains(got, want) {
+					t.Errorf("expected response body to contain %q, but got: %s", want, got)
+				}
+			default:
+				// we expect Success
+				if want, got := `"status":"Success"`, string(body); !strings.Contains(got, want) {
+					t.Errorf("expected response body to contain %q, but got: %s", want, got)
+				}
+			}
+
+			// verify normal deleter expectations
+			if want, got := test.regularDeleterInvoked, normalDeleterGot.invoked; want != got {
+				t.Errorf("expected the normal deleter to be ivoked %d times, but got: %d", want, got)
+			}
+			// when invoked, the normal deleter should never see the ignore option enabled
+			if test.regularDeleterInvoked == 1 && normalDeleterGot.ignore != nil {
+				t.Errorf("expected IgnoreStoreReadErrorWithClusterBreakingPotential to be nil for the normal deleter, but got: %t", *normalDeleterGot.ignore)
+			}
+			// we expect certain annotation to be added
+			const keyWant = "apiserver.k8s.io/unsafe-delete-ignore-read-error"
+			ac := audit.AuditContextFrom(req.Context())
+			switch test.unsafeAnnotation {
+			case true:
+				if value, ok := ac.Event.Annotations[keyWant]; !ok || len(value) > 0 {
+					t.Errorf("expected annotation %q to exist with an empty value, but got exists: %t, value: %q", keyWant, ok, value)
+				}
+			default:
+				if value, ok := ac.Event.Annotations[keyWant]; ok || len(value) > 0 {
+					t.Errorf("did not expect annotation %q to exist, but got exists: %t, value: %q", keyWant, ok, value)
+				}
+			}
+
+			// verify unsafe deleter expectations
+			if want, got := test.unsafeDeleterInvoked, unsafeDeleterGot.invoked; want != got {
+				t.Errorf("expected the unsafe deleter to be nvoked %d times, but got: %d", want, got)
+			}
+			// when invoked, the unsafe deleter should always see the option enabled
+			if want, got := test.unsafeDeleterInvoked == 1, ptr.Deref[bool](unsafeDeleterGot.ignore, false); want && want != got {
+				t.Errorf("expected IgnoreStoreReadErrorWithClusterBreakingPotential to be %t for the unsafe deleter, but got: %t", want, got)
+			}
+		})
+	}
+}
+
+func TestDeleteCollectionUsesUnsafeDeleter(t *testing.T) {
+	tests := []struct {
+		name           string
+		featureEnabled bool
+		ignoreReadErr  bool
+		// want
+		deleterInvoked   int32
+		statusCode       int
+		errshouldContain string
+	}{
+		{
+			name:             "feature disabled, ignore not set, should invoke the deleter",
+			featureEnabled:   false,
+			ignoreReadErr:    false,
+			deleterInvoked:   1,
+			statusCode:       http.StatusOK,
+			errshouldContain: "",
+		},
+		{
+			name:             "feature disabled, ignore set, should invoke the deleter",
+			featureEnabled:   false,
+			ignoreReadErr:    true,
+			deleterInvoked:   1,
+			statusCode:       http.StatusOK,
+			errshouldContain: "",
+		},
+		{
+			name:             "feature enabled, ignore not set, should invoke deleter",
+			featureEnabled:   true,
+			ignoreReadErr:    false,
+			deleterInvoked:   1,
+			statusCode:       http.StatusOK,
+			errshouldContain: "",
+		},
+		{
+			name:             "feature enabled, ignore set, invalid error expected",
+			featureEnabled:   true,
+			ignoreReadErr:    true,
+			statusCode:       http.StatusUnprocessableEntity,
+			errshouldContain: `is invalid: ignoreStoreReadErrorWithClusterBreakingPotential: Invalid value: true: is not allowed with DELETECOLLECTION, try again after removing the option`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.AllowUnsafeMalformedObjectDeletion, test.featureEnabled)
+
+			scheme := runtime.NewScheme()
+			metav1.AddToGroupVersion(scheme, metav1.SchemeGroupVersion)
+			if err := metainternalversion.AddToScheme(scheme); err != nil {
+				t.Errorf("err: %v", err)
+			}
+			codecs := serializer.NewCodecFactory(scheme)
+			info, ok := runtime.SerializerInfoForMediaType(codecs.SupportedMediaTypes(), runtime.ContentTypeJSON)
+			if !ok {
+				t.Fatalf("failed to setup serializer")
+			}
+			scope := &RequestScope{
+				Namer:            &mockNamer{},
+				Serializer:       runtime.NewSimpleNegotiatedSerializer(info),
+				ParameterCodec:   runtime.NewParameterCodec(scheme),
+				MetaGroupVersion: metav1.SchemeGroupVersion,
+			}
+
+			var invokedGot int32
+			deleteOptionsGot := atomic.Pointer[metav1.DeleteOptions]{}
+			deleter := func(ctx context.Context, _ rest.ValidateObjectFunc, options *metav1.DeleteOptions, _ *metainternalversion.ListOptions) (runtime.Object, error) {
+				atomic.AddInt32(&invokedGot, 1)
+				deleteOptionsGot.Store(options)
+				return nil, nil
+			}
+
+			handler := DeleteCollection(fakeCollectionDeleterFunc(deleter), true, scope, &fakeAdmitter{})
+
+			req := newRequest(t, test.ignoreReadErr)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, req)
+
+			// verify the http response
+			resp := recorder.Result()
+			if want, got := test.statusCode, resp.StatusCode; want != got {
+				t.Errorf("expected status code: %d, but got: %d", want, got)
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("unexpected error reading response body: %v", err)
+			}
+			switch {
+			case len(test.errshouldContain) > 0:
+				if want, got := test.errshouldContain, string(body); !strings.Contains(got, want) {
+					t.Errorf("expected response body to contain %q, but got: %s", want, got)
+				}
+			default:
+				// we expect Success
+				if want, got := `"status":"Success"`, string(body); !strings.Contains(got, want) {
+					t.Errorf("expected response body to contain %q, but got: %s", want, got)
+				}
+			}
+			if want, got := test.deleterInvoked, atomic.LoadInt32(&invokedGot); want != got {
+				t.Errorf("expected the normal deleter to be ivoked %d times, but got: %d", want, got)
+			}
+			// when invoked, the normal deleter should never see the ignore option enabled
+			if test.deleterInvoked == 1 {
+				if got := deleteOptionsGot.Load().IgnoreStoreReadErrorWithClusterBreakingPotential; got != nil {
+					t.Errorf("expected IgnoreStoreReadErrorWithClusterBreakingPotential to be nil for the normal deleter, but got: %t", *got)
+				}
+			}
+			// we never expect the annotation to be added
+			const keyNeverWant = "apiserver.k8s.io/unsafe-delete-ignore-read-error"
+			ac := audit.AuditContextFrom(req.Context())
+			if value, ok := ac.Event.Annotations[keyNeverWant]; ok || len(value) > 0 {
+				t.Errorf("did not expect annotation %q to exist, but got exists: %t, value: %q", keyNeverWant, ok, value)
+			}
+		})
+	}
+}
+
+func newRequest(t *testing.T, ignoreReadErr bool) *http.Request {
+	req, err := http.NewRequest(http.MethodGet, "/test", ioutil.NopCloser(strings.NewReader("")))
+	if err != nil {
+		t.Fatalf("unexpected error creating a new http.Request: %v", err)
+	}
+
+	reqInfo := &request.RequestInfo{IsResourceRequest: true}
+	req = req.WithContext(request.WithRequestInfo(req.Context(), reqInfo))
+
+	ctx := audit.WithAuditContext(req.Context())
+	ac := audit.AuditContextFrom(ctx)
+	ac.RequestAuditConfig.Level = auditapis.LevelMetadata
+	req = req.WithContext(ctx)
+
+	if ignoreReadErr {
+		q := req.URL.Query()
+		q.Add("ignoreStoreReadErrorWithClusterBreakingPotential", "true")
+		req.URL.RawQuery = q.Encode()
+	}
+
+	// t.Logf("req: %q", req.URL.String())
+
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+type holder struct {
+	invoked int
+	ignore  *bool
+}
+
+type fakeDeleter struct {
+	holder *holder
+}
+
+func (f *fakeDeleter) Delete(ctx context.Context, name string, deleteValidation rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
+	f.holder.invoked++
+	f.holder.ignore = options.IgnoreStoreReadErrorWithClusterBreakingPotential
+	return nil, true, nil
+}
+
+type corruptObjDeleterProvider struct {
+	rest.GracefulDeleter
+	unsafeDeleter rest.GracefulDeleter
+}
+
+func (p *corruptObjDeleterProvider) GetCorruptObjDeleter() rest.GracefulDeleter {
+	return p.unsafeDeleter
+}
+
+type fakeAdmitter struct{}
+
+func (f *fakeAdmitter) Handles(_ admission.Operation) bool { return false }
 
 func TestDeleteCollectionWithNoContextDeadlineEnforced(t *testing.T) {
 	var invokedGot, hasDeadlineGot int32
