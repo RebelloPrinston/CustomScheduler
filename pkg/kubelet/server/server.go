@@ -67,6 +67,8 @@ import (
 	metricsfeatures "k8s.io/component-base/metrics/features"
 	"k8s.io/component-base/metrics/legacyregistry"
 	"k8s.io/component-base/metrics/prometheus/slis"
+	zpagesfeatures "k8s.io/component-base/zpages/features"
+	"k8s.io/component-base/zpages/statusz"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 	"k8s.io/cri-client/pkg/util"
 	podresourcesapi "k8s.io/kubelet/pkg/apis/podresources/v1"
@@ -105,6 +107,11 @@ const (
 	debugFlagPath       = "/debug/flags/v"
 	podsPath            = "/pods"
 	runningPodsPath     = "/runningpods/"
+)
+
+const (
+	// Kubelet component name
+	ComponentKubelet = "kubelet"
 )
 
 // Server is a http.Handler which exposes kubelet functionality over HTTP.
@@ -405,6 +412,11 @@ func (s *Server) InstallDefaultHandlers() {
 	}
 	checkers = append(checkers, s.extendedCheckers...)
 	healthz.InstallHandler(s.restfulCont, checkers...)
+
+	if utilfeature.DefaultFeatureGate.Enabled(zpagesfeatures.ComponentStatusz) {
+		s.addMetricsBucketMatcher("statusz")
+		statusz.Install(s.restfulCont, ComponentKubelet, statusz.NewRegistry())
+	}
 
 	slis.SLIMetricsWithReset{}.Install(s.restfulCont)
 
