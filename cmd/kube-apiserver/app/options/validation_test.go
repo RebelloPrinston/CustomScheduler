@@ -63,7 +63,6 @@ func TestClusterServiceIPRange(t *testing.T) {
 		name                 string
 		options              *ServerRunOptions
 		expectErrors         bool
-		ipAllocatorGate      bool
 		disableDualWriteGate bool
 	}{
 		{
@@ -95,42 +94,36 @@ func TestClusterServiceIPRange(t *testing.T) {
 			name:                 "service cidr IPv4 is too big but gate enbled",
 			expectErrors:         true,
 			options:              makeOptionsWithCIDRs("10.0.0.0/8", ""),
-			ipAllocatorGate:      true,
 			disableDualWriteGate: false,
 		},
 		{
 			name:                 "service cidr IPv6 is too big but only ipallocator gate enabled",
 			expectErrors:         true,
 			options:              makeOptionsWithCIDRs("2001:db8::/64", ""),
-			ipAllocatorGate:      true,
 			disableDualWriteGate: false,
 		},
 		{
 			name:                 "service cidr IPv6 is too big but only ipallocator gate enabled",
 			expectErrors:         true,
 			options:              makeOptionsWithCIDRs("2001:db8::/12", ""),
-			ipAllocatorGate:      true,
 			disableDualWriteGate: false,
 		},
 		{
 			name:                 "service cidr IPv4 is too big but gate enabled",
 			expectErrors:         false,
 			options:              makeOptionsWithCIDRs("10.0.0.0/8", ""),
-			ipAllocatorGate:      true,
 			disableDualWriteGate: true,
 		},
 		{
 			name:                 "service cidr IPv6 is too big but gate enabled",
 			expectErrors:         false,
 			options:              makeOptionsWithCIDRs("2001:db8::/64", ""),
-			ipAllocatorGate:      true,
 			disableDualWriteGate: true,
 		},
 		{
 			name:                 "service cidr IPv6 is too big and gate enabled",
 			expectErrors:         false,
 			options:              makeOptionsWithCIDRs("2001:db8::/12", ""),
-			ipAllocatorGate:      true,
 			disableDualWriteGate: true,
 		},
 		{
@@ -142,14 +135,12 @@ func TestClusterServiceIPRange(t *testing.T) {
 			name:                 "dual-stack secondary cidr too big but only ipallocator gate enabled",
 			expectErrors:         true,
 			options:              makeOptionsWithCIDRs("10.0.0.0/16", "3000::/48"),
-			ipAllocatorGate:      true,
 			disableDualWriteGate: false,
 		},
 		{
 			name:                 "dual-stack secondary cidr too big gate enabled",
 			expectErrors:         false,
 			options:              makeOptionsWithCIDRs("10.0.0.0/16", "3000::/48"),
-			ipAllocatorGate:      true,
 			disableDualWriteGate: true,
 		},
 		{
@@ -182,7 +173,6 @@ func TestClusterServiceIPRange(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.MultiCIDRServiceAllocator, tc.ipAllocatorGate)
 			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.DisableAllocatorDualWrite, tc.disableDualWriteGate)
 
 			errs := validateClusterIPFlags(tc.options.Extra)
