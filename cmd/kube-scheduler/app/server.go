@@ -239,11 +239,16 @@ func Run(ctx context.Context, cc *schedulerserverconfig.CompletedConfig, sched *
 	// Start up the healthz server.
 	if cc.SecureServing != nil {
 		handler := buildHandlerChain(newHealthEndpointsAndMetricsHandler(&cc.ComponentConfig, cc.InformerFactory, isLeader, checks, readyzChecks), cc.Authentication.Authenticator, cc.Authorization.Authorizer)
-		// TODO: handle stoppedCh and listenerStoppedCh returned by c.SecureServing.Serve
-		if _, _, err := cc.SecureServing.Serve(handler, 0, ctx.Done()); err != nil {
+		serverShutdownCh, listenerStoppedCh, err := cc.SecureServing.Serve(handler, 0, ctx.Done())
+		if err != nil {
 			// fail early for secure handlers, removing the old error loop from above
 			return fmt.Errorf("failed to start secure server: %v", err)
 		}
+		defer func() {
+			// for graceful shutdown
+			<-serverShutdownCh
+			<-listenerStoppedCh
+		}()
 	}
 
 	startInformersAndWaitForSync := func(ctx context.Context) {
@@ -292,7 +297,6 @@ func Run(ctx context.Context, cc *schedulerserverconfig.CompletedConfig, sched *
 				case <-ctx.Done():
 					// We were asked to terminate. Exit 0.
 					logger.Info("Requested to terminate, exiting")
-					os.Exit(0)
 				default:
 					// We lost the lock.
 					logger.Error(nil, "Leaderelection lost")
@@ -307,12 +311,19 @@ func Run(ctx context.Context, cc *schedulerserverconfig.CompletedConfig, sched *
 
 		leaderElector.Run(ctx)
 
-		return fmt.Errorf("lost lease")
+		// return nil if ctx is done because it means we were asked to terminate.
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			return fmt.Errorf("lost lease")
+		}
 	}
 
 	// Leader election is disabled, so runCommand inline until done.
 	close(waitingForLeader)
 	sched.Run(ctx)
+
 	return fmt.Errorf("finished without leader elect")
 }
 
