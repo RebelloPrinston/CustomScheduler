@@ -60,6 +60,8 @@ import (
 	"k8s.io/component-base/metrics/prometheus/slis"
 	"k8s.io/component-base/version"
 	"k8s.io/component-base/version/verflag"
+	zpagesfeatures "k8s.io/component-base/zpages/features"
+	"k8s.io/component-base/zpages/flagz"
 	nodeutil "k8s.io/component-helpers/node/util"
 	"k8s.io/klog/v2"
 	api "k8s.io/kubernetes/pkg/apis/core"
@@ -162,6 +164,7 @@ type ProxyServer struct {
 	Hostname        string
 	PrimaryIPFamily v1.IPFamily
 	NodeIPs         map[v1.IPFamily]net.IP
+	Flagz           flagz.Reader
 
 	podCIDRs []string // only used for LocalModeNodeCIDR
 
@@ -169,7 +172,7 @@ type ProxyServer struct {
 }
 
 // newProxyServer creates a ProxyServer based on the given config
-func newProxyServer(ctx context.Context, config *kubeproxyconfig.KubeProxyConfiguration, master string, initOnly bool) (*ProxyServer, error) {
+func newProxyServer(ctx context.Context, config *kubeproxyconfig.KubeProxyConfiguration, master string, initOnly bool, flagzReader flagz.Reader) (*ProxyServer, error) {
 	logger := klog.FromContext(ctx)
 
 	s := &ProxyServer{
@@ -256,6 +259,12 @@ func newProxyServer(ctx context.Context, config *kubeproxyconfig.KubeProxyConfig
 	s.Proxier, err = s.createProxier(ctx, config, dualStackSupported, initOnly)
 	if err != nil {
 		return nil, err
+	}
+
+	if utilfeature.DefaultFeatureGate.Enabled(zpagesfeatures.ComponentFlagz) {
+		if flagzReader != nil {
+			s.Flagz = flagzReader
+		}
 	}
 
 	return s, nil
@@ -435,7 +444,7 @@ func serveHealthz(ctx context.Context, hz *healthcheck.ProxierHealthServer, errC
 	go wait.Until(fn, 5*time.Second, ctx.Done())
 }
 
-func serveMetrics(ctx context.Context, bindAddress string, proxyMode kubeproxyconfig.ProxyMode, enableProfiling bool, errCh chan error) {
+func serveMetrics(ctx context.Context, bindAddress string, proxyMode kubeproxyconfig.ProxyMode, enableProfiling bool, flagzReader flagz.Reader, errCh chan error) {
 	if len(bindAddress) == 0 {
 		return
 	}
@@ -458,6 +467,12 @@ func serveMetrics(ctx context.Context, bindAddress string, proxyMode kubeproxyco
 	}
 
 	configz.InstallHandler(proxyMux)
+
+	if utilfeature.DefaultFeatureGate.Enabled(zpagesfeatures.ComponentFlagz) {
+		if flagzReader != nil {
+			flagz.Install(proxyMux, "kube-proxy", flagzReader)
+		}
+	}
 
 	fn := func() {
 		var err error
@@ -526,7 +541,7 @@ func (s *ProxyServer) Run(ctx context.Context) error {
 	serveHealthz(ctx, s.HealthzServer, healthzErrCh)
 
 	// Start up a metrics server if requested
-	serveMetrics(ctx, s.Config.MetricsBindAddress, s.Config.Mode, s.Config.EnableProfiling, metricsErrCh)
+	serveMetrics(ctx, s.Config.MetricsBindAddress, s.Config.Mode, s.Config.EnableProfiling, s.Flagz, metricsErrCh)
 
 	noProxyName, err := labels.NewRequirement(apis.LabelServiceProxyName, selection.DoesNotExist, nil)
 	if err != nil {
